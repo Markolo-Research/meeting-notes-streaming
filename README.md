@@ -45,6 +45,9 @@ If you prefer to set up manually:
 # Arch Linux
 sudo pacman -S python python-pip ffmpeg portaudio
 
+# Ubuntu / Debian
+sudo apt install python3 python3-pip python3-venv ffmpeg portaudio19-dev pulseaudio-utils
+
 # Your system should already have PipeWire/PulseAudio
 ```
 
