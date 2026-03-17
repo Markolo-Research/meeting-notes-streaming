@@ -1,0 +1,56 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "meeting-notes"
+version = "0.2.0"
+description = "A local, privacy-focused AI meeting notetaker for Linux with a keyboard-driven TUI"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "James Pember" },
+]
+keywords = ["meeting", "notes", "transcription", "whisper", "tui"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Sound/Audio",
+    "Topic :: Office/Business",
+]
+dependencies = [
+    "textual>=0.50.0",
+    "openai-whisper>=20231117",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+openai = ["openai>=1.0.0"]
+anthropic = ["anthropic>=0.18.0"]
+openrouter = ["openrouter>=0.1.0"]
+cloud = [
+    "openai>=1.0.0",
+    "anthropic>=0.18.0",
+    "openrouter>=0.1.0",
+]
+all = [
+    "openai>=1.0.0",
+    "anthropic>=0.18.0",
+    "openrouter>=0.1.0",
+]
+
+[project.scripts]
+meeting-notes = "meeting_notes.app:run"
+
+[project.urls]
+Homepage = "https://github.com/jamespember/meeting-notes"
+Repository = "https://github.com/jamespember/meeting-notes"
