@@ -5,6 +5,7 @@ import sys
 import time
 import subprocess
 import os
+import multiprocessing.resource_tracker
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
@@ -1544,5 +1545,15 @@ class MeetingNotesApp(App):
 
 def run(dev_mode: bool = False):
     """Run the application."""
+    # Pre-initialize the multiprocessing resource tracker while sys.stderr
+    # is still the real fd 2.  Textual's app.run() redirects stderr to a
+    # _PrintCapture whose fileno() returns -1, which later causes
+    # "bad value(s) in fds_to_keep" when whisper/tqdm triggers
+    # resource_tracker._launch().
+    try:
+        multiprocessing.resource_tracker.ensure_running()
+    except Exception:
+        pass  # Non-critical, best effort
+
     app = MeetingNotesApp(dev_mode=dev_mode)
     app.run()
