@@ -1077,6 +1077,13 @@ class MeetingNotesApp(App):
         """
         import shutil
         
+        # If running inside tmux, open editor in a new tmux window
+        if os.getenv("TMUX"):
+            try:
+                subprocess.Popen(["tmux", "new-window", "--", editor, file_path])
+                return True
+            except Exception:
+                pass  # Fall through to terminal detection
         # Try to detect terminal emulator (check $TERMINAL first, then common terminals)
         terminal = os.getenv('TERMINAL')
         
