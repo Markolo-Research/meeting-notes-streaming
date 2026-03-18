@@ -602,6 +602,11 @@ class SettingsScreen(Screen):
         widgets.append(editor_input)
         widgets.append(Static("Command used to open notes (e.g. nvim, code, emacs)", classes="settings-hint"))
         
+        
+        widgets.append(Static("Terminal File Browser", classes="settings-label"))
+        browser_input = Input(value=self.config.get("terminal_file_browser", ""), id="terminal-file-browser-input", classes="settings-input")
+        widgets.append(browser_input)
+        widgets.append(Static("Terminal file browser for browsing notes (e.g. ranger, vidir, nnn, lf, vifm, yazi)", classes="settings-hint"))
         return widgets
     
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -736,6 +741,13 @@ class SettingsScreen(Screen):
             editor_input = self.query("#editor-input")
             if editor_input:
                 self.config["editor"] = editor_input[0].value.strip()
+        except Exception:
+            pass
+        
+        try:
+            browser_input = self.query("#terminal-file-browser-input")
+            if browser_input:
+                self.config["terminal_file_browser"] = browser_input[0].value.strip()
         except Exception:
             pass
         

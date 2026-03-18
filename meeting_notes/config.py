@@ -32,6 +32,7 @@ class AppConfig:
     recordings_dir: str = "recordings"
     transcripts_dir: str = "transcripts"
     editor: str = "nvim"
+    terminal_file_browser: str = ""  # Terminal file browser (ranger, vidir, nnn, lf, vifm, yazi, etc.)
     recording_mode: str = "combined"
     
     def to_dict(self) -> Dict[str, Any]:
