@@ -684,7 +684,7 @@ class MeetingNotesApp(App):
             ai_model=self.config.ai_model,
             api_key=api_key
         )
-        self.notes_dir = Path(self.config.notes_dir)
+        self.notes_dir = Path(self.config.notes_dir).expanduser()
         self.notes_dir.mkdir(exist_ok=True)
         self.is_recording = False
         self.timer_interval = None
@@ -1467,7 +1467,7 @@ class MeetingNotesApp(App):
                                 break
                 
                 if transcript_filename:
-                    transcript_path = Path(self.config.transcripts_dir) / transcript_filename
+                    transcript_path = Path(self.config.transcripts_dir).expanduser() / transcript_filename
                     
                     if transcript_path.exists():
                         self.push_screen(TranscriptViewer(transcript_path))
@@ -1525,7 +1525,7 @@ class MeetingNotesApp(App):
                 ai_model=self.config.ai_model,
                 api_key=api_key
             )
-            self.notes_dir = Path(self.config.notes_dir)
+            self.notes_dir = Path(self.config.notes_dir).expanduser()
             self.notes_dir.mkdir(exist_ok=True)
             
             # Reinitialize recorder if not currently recording
