@@ -34,6 +34,7 @@ class AppConfig:
     editor: str = "nvim"
     terminal_file_browser: str = ""  # Terminal file browser (ranger, vidir, nnn, lf, vifm, yazi, etc.)
     recording_mode: str = "combined"
+    recording_retention_days: int = 30  # Auto-delete .wav files older than this on startup (0 to disable)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert config to dictionary."""

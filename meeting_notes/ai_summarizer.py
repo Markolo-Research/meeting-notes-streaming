@@ -302,14 +302,14 @@ class AnthropicSummarizer(BaseSummarizer):
     
     MODELS = {
         "haiku": {
-            "id": "claude-3-5-haiku-20241022",
-            "name": "Claude 3.5 Haiku",
+            "id": "claude-haiku-4-5-20251001",
+            "name": "Claude Haiku 4.5",
             "cost_per_1k_input": 0.0008,
             "cost_per_1k_output": 0.004,
         },
         "sonnet": {
-            "id": "claude-3-5-sonnet-20241022",
-            "name": "Claude 3.5 Sonnet",
+            "id": "claude-sonnet-4-6",
+            "name": "Claude Sonnet 4.6",
             "cost_per_1k_input": 0.003,
             "cost_per_1k_output": 0.015,
         }
