@@ -354,3 +354,19 @@ This is a personal project but suggestions and contributions are welcome!
 1. Open an issue for bugs or feature requests
 2. Check the roadmap above for planned features
 3. Submit PRs with clear descriptions
+
+### Running tests
+
+```bash
+# Lightweight tests (matches CI — no whisper/torch needed)
+pip install pytest pytest-asyncio ruff openai anthropic openrouter pyyaml
+pytest tests/test_config.py tests/test_paths_and_fallbacks.py \
+       tests/test_recording_retention.py tests/test_summarizers.py
+ruff check meeting_notes/ tests/
+
+# Full suite (also runs Textual headless smoke tests; needs the full env)
+pip install -e ".[all,dev]"
+pytest
+```
+
+CI (`.github/workflows/ci.yml`) runs the lightweight subset on every PR.
