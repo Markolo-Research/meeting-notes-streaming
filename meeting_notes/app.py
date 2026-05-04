@@ -1078,6 +1078,13 @@ class MeetingNotesApp(App):
         """
         import shutil
         
+        # If running inside tmux, open editor in a new tmux window
+        if os.getenv("TMUX"):
+            try:
+                subprocess.Popen(["tmux", "new-window", "--", editor, file_path])
+                return True
+            except Exception:
+                pass  # Fall through to terminal detection
         # Try to detect terminal emulator (check $TERMINAL first, then common terminals)
         terminal = os.getenv('TERMINAL')
         
@@ -1192,7 +1199,17 @@ class MeetingNotesApp(App):
             try:
                 import shutil
                 file_path = str(viewer.current_note.absolute())
-                
+                folder = str(viewer.current_note.parent)
+
+                # If a terminal file browser is configured, use it
+                terminal_browser = self.config.terminal_file_browser
+                if terminal_browser and shutil.which(terminal_browser):
+                    if self._open_in_new_terminal(terminal_browser, folder):
+                        self.notify(
+                            f"Opened in {terminal_browser}", severity="information"
+                        )
+                        return
+
                 # Try to detect file manager and use --select flag
                 # This focuses on the specific file instead of just opening the folder
                 file_managers = [
@@ -1209,15 +1226,30 @@ class MeetingNotesApp(App):
                     if shutil.which(cmd[0]):
                         subprocess.Popen(cmd)
                         self.notify(f"Opened in {fm_name}", severity="information")
-                        opened = True
-                        break
+                        return
+
+                # Fallback: try to auto-detect a terminal file browser
+                terminal_browsers = [
+                    "ranger",
+                    "yazi",
+                    "lf",
+                    "nnn",
+                    "vifm",
+                    "mc",
+                    "vidir",
+                    "joshuto",
+                    "broot",
+                ]
+                for browser in terminal_browsers:
+                    if shutil.which(browser):
+                        if self._open_in_new_terminal(browser, folder):
+                            self.notify(f"Opened in {browser}", severity="information")
+                            return
                 
                 # Fallback: just open the folder
-                if not opened:
-                    folder = viewer.current_note.parent
-                    subprocess.Popen(['xdg-open', str(folder)])
-                    self.notify(f"Opened folder (file manager doesn't support --select)", severity="information")
-                    
+                subprocess.Popen(['xdg-open', folder])
+                self.notify(f"Opened folder (file manager doesn't support --select)", severity="information")
+
             except Exception as e:
                 self.notify(f"Failed to open: {e}", severity="error")
         else:
