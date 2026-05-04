@@ -604,14 +604,14 @@ class SettingsScreen(Screen):
         
         return widgets
     
-    def on_button_pressed(self, event: Button.Pressed) -> None:
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
         button_id = event.button.id
         
         # Section navigation
         if button_id and button_id.startswith("section-"):
             section = button_id.split("-")[1]
-            self.switch_section(section)
+            await self.switch_section(section)
         
         # Provider selection
         elif button_id and button_id.startswith("provider-"):
@@ -626,20 +626,20 @@ class SettingsScreen(Screen):
                     self.config["ai_model"] = "balanced"
                 elif event.button.provider_id == "local":
                     self.config["ai_model"] = self.config.get("ollama_model", "llama3.2:3b")
-                self.refresh_content()
+                await self.refresh_content()
         
         # AI model selection (for cloud providers)
         elif button_id and button_id.startswith("aimodel-"):
             if hasattr(event.button, 'model_id'):
                 self.config["ai_model"] = event.button.model_id
-                self.refresh_content()
+                await self.refresh_content()
         
         # Ollama model selection (for local provider)
         elif button_id and button_id.startswith("model-"):
             if hasattr(event.button, 'model_name'):
                 self.config["ollama_model"] = event.button.model_name
                 self.config["ai_model"] = event.button.model_name  # Sync ai_model
-                self.refresh_content()
+                await self.refresh_content()
         
         # Install model
         elif button_id == "install-model-button":
@@ -651,7 +651,7 @@ class SettingsScreen(Screen):
         elif button_id == "cancel-button":
             self.action_cancel()
     
-    def switch_section(self, section: str) -> None:
+    async def switch_section(self, section: str) -> None:
         """Switch to a different settings section."""
         self.current_section = section
         
@@ -662,12 +662,12 @@ class SettingsScreen(Screen):
             else:
                 item.remove_class("-active")
         
-        self.refresh_content()
+        await self.refresh_content()
     
-    def refresh_content(self) -> None:
+    async def refresh_content(self) -> None:
         """Refresh the content area based on current section."""
         content = self.query_one("#settings-content", ScrollableContainer)
-        content.remove_children()
+        await content.remove_children()
         
         # Render appropriate section
         if self.current_section == "ai":
@@ -683,7 +683,7 @@ class SettingsScreen(Screen):
         
         # Mount all widgets (buttons are now in fixed footer, not here)
         for widget in widgets:
-            content.mount(widget)
+            await content.mount(widget)
     
     def action_install_model(self) -> None:
         """Open the install model dialog."""
@@ -699,12 +699,12 @@ class SettingsScreen(Screen):
             # Show installing screen
             self.app.push_screen(InstallingModelScreen(model_name), self.handle_installation_complete)
     
-    def handle_installation_complete(self, success: bool) -> None:
+    async def handle_installation_complete(self, success: bool) -> None:
         """Handle completion of model installation."""
         if success:
             self.app.notify("✓ Model installed successfully!", severity="information")
             # Refresh the content to show new model
-            self.refresh_content()
+            await self.refresh_content()
         else:
             self.app.notify("✗ Model installation failed", severity="error")
     
