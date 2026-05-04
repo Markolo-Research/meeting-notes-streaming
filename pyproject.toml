@@ -47,6 +47,34 @@ all = [
     "anthropic>=0.18.0",
     "openrouter>=0.1.0",
 ]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "ruff>=0.4",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+extend-exclude = ["venv", "notes", "transcripts", "recordings"]
+
+[tool.ruff.lint]
+# Conservative ruleset: real bugs and unused code, no style nitpicks.
+# `meeting_notes/` is not new code, so we don't want to fight existing style.
+select = ["E9", "F", "B"]
+ignore = [
+    "F401",  # imported but unused — Textual modules import widgets defensively
+    "F403",  # star imports — ditto
+    "F841",  # local variable assigned but never used — common in TUI handlers
+    "F541",  # f-string without placeholders — pre-existing, harmless
+    "B008",  # function call in default argument — used in some Textual patterns
+    "B904",  # raise ... from err — pre-existing, would change tracebacks visibly
+    "B005",  # strip with multi-character — pre-existing, single occurrence, low risk
+]
 
 [project.scripts]
 meeting-notes = "meeting_notes.app:run"

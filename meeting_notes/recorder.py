@@ -26,7 +26,7 @@ class AudioRecorder:
             dev_mode: If True, preserve temporary files for debugging (default: False)
         """
         self.output_dir = Path(output_dir).expanduser()
-        self.output_dir.mkdir(exist_ok=True)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
         self.process: Optional[subprocess.Popen] = None
         self.current_file: Optional[Path] = None
         self.mode = mode  # "mic", "system", or "combined" (default)

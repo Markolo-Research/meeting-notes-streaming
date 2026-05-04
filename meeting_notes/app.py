@@ -7,7 +7,7 @@ import subprocess
 import os
 import multiprocessing.resource_tracker
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from textual.app import App, ComposeResult
@@ -76,14 +76,32 @@ class RecordingView(Container):
     def on_key(self, event) -> None:
         """Handle key events for the recording view."""
         if event.key == "escape":
-            # Unfocus the title input
+            # Unfocus the title input or notes textarea so global key
+            # bindings (like 's' to stop) work again without tabbing away.
             try:
-                title_input = self.query_one("#meeting-title-input", Input)
-                if title_input.has_focus:
+                if self._has_focused_input():
                     self.screen.set_focus(None)
                     event.prevent_default()
             except Exception:
-                pass  # Input not found or not mounted
+                pass  # Inputs not found or not mounted
+        elif event.key == "s" and not self._has_focused_input():
+            # Allow 's' to stop the recording even when the recording view
+            # is focused but no input widget within it is. Without this,
+            # the user has to manually tab away from inputs first.
+            event.prevent_default()
+            self.app.action_stop_recording()
+        elif event.key == "x" and not self._has_focused_input():
+            event.prevent_default()
+            self.app.action_cancel_recording()
+
+    def _has_focused_input(self) -> bool:
+        """Check if any text input widget within this view has focus."""
+        try:
+            title_input = self.query_one("#meeting-title-input", Input)
+            notes_input = self.query_one("#user-notes-input", TextArea)
+            return title_input.has_focus or notes_input.has_focus
+        except Exception:
+            return False
 
 
 class MeetingListItem(ListItem):
@@ -686,12 +704,39 @@ class MeetingNotesApp(App):
             api_key=api_key
         )
         self.notes_dir = Path(self.config.notes_dir).expanduser()
-        self.notes_dir.mkdir(exist_ok=True)
+        self.notes_dir.mkdir(parents=True, exist_ok=True)
         self.is_recording = False
         self.timer_interval = None
         self.recording_start_time = None
         self.all_note_paths = []  # Store all note paths for filtering
-        
+
+        # Clean up old recordings on startup
+        self._cleanup_old_recordings()
+
+    def _cleanup_old_recordings(self) -> None:
+        """Delete .wav recordings older than recording_retention_days.
+
+        No-op if retention_days <= 0 or the recordings dir doesn't exist.
+        Errors are logged but not raised — cleanup is best-effort.
+        """
+        retention_days = getattr(self.config, "recording_retention_days", 0)
+        if retention_days <= 0:
+            return
+        recordings_dir = Path(self.config.recordings_dir).expanduser()
+        if not recordings_dir.is_dir():
+            return
+        cutoff = datetime.now() - timedelta(days=retention_days)
+        for wav_file in recordings_dir.glob("*.wav"):
+            try:
+                if datetime.fromtimestamp(wav_file.stat().st_mtime) < cutoff:
+                    logger.info(
+                        f"Removing old recording: {wav_file.name} "
+                        f"(older than {retention_days} days)"
+                    )
+                    wav_file.unlink()
+            except Exception as e:
+                logger.warning(f"Failed to remove {wav_file.name}: {e}")
+
     def compose(self) -> ComposeResult:
         """Build the UI."""
         # Main content area
@@ -1483,6 +1528,12 @@ class MeetingNotesApp(App):
         """View transcript for the selected meeting."""
         viewer = self.query_one("#note-viewer", NoteViewer)
         if viewer.current_note:
+            # Guard against the underlying note file having been deleted
+            # since it was loaded (e.g. cleaned up externally) — otherwise
+            # the open() below crashes with FileNotFoundError.
+            if not Path(viewer.current_note).exists():
+                self.notify("Note file no longer exists", severity="warning")
+                return
             try:
                 # Read note to get transcript_file from frontmatter
                 with open(viewer.current_note, 'r') as f:
@@ -1559,7 +1610,7 @@ class MeetingNotesApp(App):
                 api_key=api_key
             )
             self.notes_dir = Path(self.config.notes_dir).expanduser()
-            self.notes_dir.mkdir(exist_ok=True)
+            self.notes_dir.mkdir(parents=True, exist_ok=True)
             
             # Reinitialize recorder if not currently recording
             if not self.is_recording:
@@ -1584,6 +1635,17 @@ def run(dev_mode: bool = False):
     # resource_tracker._launch().
     try:
         multiprocessing.resource_tracker.ensure_running()
+    except Exception:
+        pass  # Non-critical, best effort
+
+    # Belt-and-braces: tqdm lazily creates a multiprocessing.RLock the first
+    # time it is used, which on Python 3.14 also triggers the same
+    # fork_exec/fds_to_keep validation against a now-closed stderr. Force
+    # tqdm's lock to be created here while stderr is still valid; tqdm caches
+    # it at the class level so whisper's later progress bars reuse it.
+    try:
+        import tqdm
+        tqdm.tqdm.get_lock()
     except Exception:
         pass  # Non-critical, best effort
 

@@ -450,8 +450,8 @@ class SettingsScreen(Screen):
         current_model = self.config.get("ai_model", "haiku")
         
         models = [
-            ("haiku", "Claude 3.5 Haiku", "~$0.005/meeting - Fast & affordable ⭐"),
-            ("sonnet", "Claude 3.5 Sonnet", "~$0.020/meeting - Best quality"),
+            ("haiku", "Claude Haiku 4.5", "~$0.005/meeting - Fast & affordable ⭐"),
+            ("sonnet", "Claude Sonnet 4.6", "~$0.020/meeting - Best quality"),
         ]
         
         for model_id, model_name, model_desc in models:
@@ -527,7 +527,9 @@ class SettingsScreen(Screen):
                 widgets.append(Button("Install a Model", variant="warning", id="install-model-button"))
             else:
                 # Show installed models with current selection
-                current = self.config.get("ollama_model", "llama3.2:3b")
+                # `or` fallback handles empty-string config values, which
+                # dict.get's default does not.
+                current = self.config.get("ollama_model") or "llama3.2:3b"
                 
                 for model in installed:
                     is_current = model.name == current
@@ -630,7 +632,10 @@ class SettingsScreen(Screen):
                 elif event.button.provider_id == "openrouter":
                     self.config["ai_model"] = "balanced"
                 elif event.button.provider_id == "local":
-                    self.config["ai_model"] = self.config.get("ollama_model", "llama3.2:3b")
+                    # `or` fallback so an empty-string ollama_model still
+                    # produces a runnable default (dict.get only fills in the
+                    # default when the key is missing entirely).
+                    self.config["ai_model"] = self.config.get("ollama_model") or "llama3.2:3b"
                 await self.refresh_content()
         
         # AI model selection (for cloud providers)
