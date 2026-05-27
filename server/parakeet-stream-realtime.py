@@ -39,21 +39,33 @@ def common_prefix_len(a: str, b: str) -> int:
 
 
 class Typer:
-    """wtype frontend with diff-against-last-typed.
+    """Diff-against-last-typed text injector.
 
-    wtype has two delay knobs and they do different things:
-    - -d MS: delay between chars WITHIN a text arg.
-    - -s MS: pre-delay before the next OPERATION (-k, text, etc.).
-    Spaces between words are emitted as `-s INTER -k space -s INTER`
-    so picky apps (Electron/Chromium/GTK4) see a discrete event with
-    enough gap on either side to not coalesce it with neighbours.
+    Two modes:
+    - paste (default when wl-copy/wl-paste available): backspace via wtype,
+      then wl-copy + Ctrl+V to inject the new suffix atomically. Reliable
+      in Electron/Chromium/GTK4 where synthetic key events get dropped.
+    - wtype-text: emit the suffix as wtype key events with -s gaps around
+      every -k space. Faster, no clipboard clobber, but lossy in picky apps.
     """
 
-    def __init__(self, enabled: bool, key_delay_ms: int, inter_op_ms: int):
+    def __init__(
+        self,
+        enabled: bool,
+        key_delay_ms: int,
+        inter_op_ms: int,
+        paste_mode: bool,
+    ):
         self.enabled = enabled and shutil.which("wtype") is not None
         self.visible = ""
         self.delay_args = ["-d", str(key_delay_ms)] if key_delay_ms > 0 else []
         self.inter_op = str(inter_op_ms) if inter_op_ms > 0 else None
+        self.paste_mode = (
+            paste_mode
+            and shutil.which("wl-copy") is not None
+            and shutil.which("wl-paste") is not None
+        )
+        self._saved_clipboard: bytes | None = None
 
     def _gap(self, args: list[str]) -> None:
         if self.inter_op is not None:
@@ -68,6 +80,13 @@ class Typer:
         suffix = target[prefix:]
         if backspaces == 0 and not suffix:
             return
+        if self.paste_mode:
+            self._apply_paste(backspaces, suffix)
+        else:
+            self._apply_wtype(backspaces, suffix)
+        self.visible = target
+
+    def _apply_wtype(self, backspaces: int, suffix: str) -> None:
         args = ["wtype", *self.delay_args]
         for _ in range(backspaces):
             args.extend(["-k", "BackSpace"])
@@ -81,7 +100,45 @@ class Typer:
                 if chunk:
                     args.append(chunk)
         subprocess.run(args, check=False)
-        self.visible = target
+
+    def _apply_paste(self, backspaces: int, suffix: str) -> None:
+        if self._saved_clipboard is None:
+            self._saved_clipboard = self._snapshot_clipboard()
+        if backspaces > 0:
+            args = ["wtype"]
+            for _ in range(backspaces):
+                args.extend(["-k", "BackSpace"])
+            subprocess.run(args, check=False)
+        if suffix:
+            subprocess.run(["wl-copy"], input=suffix.encode(), check=False)
+            # wl-copy daemonises; give the compositor a moment to take
+            # ownership before we trigger paste, or Ctrl+V grabs stale data.
+            time.sleep(0.03)
+            subprocess.run(
+                ["wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl"], check=False
+            )
+
+    @staticmethod
+    def _snapshot_clipboard() -> bytes:
+        try:
+            r = subprocess.run(
+                ["wl-paste", "--no-newline"],
+                capture_output=True,
+                timeout=1.0,
+            )
+            return r.stdout
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            return b""
+
+    def restore_clipboard(self) -> None:
+        if self._saved_clipboard is None or not shutil.which("wl-copy"):
+            return
+        if self._saved_clipboard:
+            subprocess.run(
+                ["wl-copy"], input=self._saved_clipboard, check=False
+            )
+        else:
+            subprocess.run(["wl-copy", "--clear"], check=False)
 
     def typed_chars(self) -> int:
         return len(self.visible)
@@ -139,6 +196,10 @@ def main() -> int:
     p.add_argument("--inter-op-ms", type=int,
                    default=int(os.environ.get("PARAKEET_RT_INTER_OP_MS", "20")),
                    help="wtype -s gap around -k space presses (default 20)")
+    p.add_argument("--no-paste", action="store_true",
+                   default=os.environ.get("PARAKEET_RT_PASTE", "1") == "0",
+                   help="Don't use clipboard paste; emit text via wtype keys. "
+                        "Default is clipboard paste when wl-copy is available.")
     args = p.parse_args()
 
     if not wait_for_socket(args.socket, args.connect_timeout):
@@ -157,6 +218,7 @@ def main() -> int:
         enabled=not args.no_live_type,
         key_delay_ms=args.key_delay_ms,
         inter_op_ms=args.inter_op_ms,
+        paste_mode=not args.no_paste,
     )
 
     def render_target() -> str:
@@ -249,6 +311,10 @@ def main() -> int:
     transcript = " ".join(finals).strip()
     if args.save_transcript:
         Path(args.save_transcript).write_text(transcript)
+    # In paste mode we clobbered the clipboard with intermediate suffixes;
+    # restore the user's original. --copy below overwrites it again with
+    # the final transcript when requested.
+    typer.restore_clipboard()
     if args.copy and transcript and shutil.which("wl-copy"):
         subprocess.run(["wl-copy"], input=transcript.encode(), check=False)
     return 0
