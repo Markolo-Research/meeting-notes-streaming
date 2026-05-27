@@ -94,15 +94,30 @@ class Typer:
         if not self.enabled:
             self.visible = target
             return
+        # Both backends resolve \n→Enter and \t→Tab via the keymap, which
+        # would submit forms or jump focus mid-transcript. Flatten to spaces.
+        target = target.replace("\n", " ").replace("\t", " ")
         prefix = common_prefix_len(self.visible, target)
         backspaces = len(self.visible) - prefix
         suffix = target[prefix:]
         if backspaces == 0 and not suffix:
             return
-        if self.mode == "ydotool":
-            self._apply_ydotool(backspaces, suffix)
-        else:
-            self._apply_wtype(backspaces, suffix)
+        try:
+            if self.mode == "ydotool":
+                self._apply_ydotool(backspaces, suffix)
+            else:
+                self._apply_wtype(backspaces, suffix)
+        except FileNotFoundError as e:
+            # Tool disappeared after the startup which() check (uninstalled,
+            # PATH change). Stop dispatching so we don't blow up the receiver
+            # thread on every subsequent partial.
+            print(
+                f"injector {self.mode} unavailable ({e.filename}); typing disabled",
+                file=sys.stderr,
+                flush=True,
+            )
+            self.enabled = False
+            return
         self.visible = target
 
     def _apply_ydotool(self, backspaces: int, suffix: str) -> None:
@@ -119,13 +134,15 @@ class Typer:
             )
 
     def _apply_wtype(self, backspaces: int, suffix: str) -> None:
-        if backspaces > 0:
-            args = ["wtype"]
-            for _ in range(backspaces):
-                args.extend(["-k", "BackSpace"])
-            subprocess.run(args, check=False)
+        # Single wtype invocation: per commit 0a9425f, the inter-process gap
+        # between separate runs lets picky apps drop the leading space of the
+        # next run ("hello world" → "helloworld").
+        args = ["wtype"]
+        for _ in range(backspaces):
+            args.extend(["-k", "BackSpace"])
         if suffix:
-            subprocess.run(["wtype", "--", suffix], check=False)
+            args.extend(["--", suffix])
+        subprocess.run(args, check=False)
 
     def typed_chars(self) -> int:
         return len(self.visible)
@@ -173,7 +190,7 @@ def main() -> int:
     p.add_argument("--record-path",
                    help="Tee captured audio to this wav (recovery backup)")
     p.add_argument("--no-live-type", action="store_true",
-                   help="Don't type via wtype; collect only")
+                   help="Disable live typing (ydotool/wtype); collect only")
     p.add_argument("--copy", action="store_true",
                    help="On exit, copy final transcript to clipboard via wl-copy")
     p.add_argument("--connect-timeout", type=float, default=45.0)
@@ -198,6 +215,18 @@ def main() -> int:
     finals: list[str] = []
     current_partial = ""
     typer = Typer(enabled=not args.no_live_type, injector=args.injector)
+    if (
+        args.injector != "auto"
+        and typer.enabled
+        and typer.mode != args.injector
+    ):
+        # Either the requested backend is unavailable, or the env-var default
+        # is a value argparse choices= didn't validate (e.g. legacy 'paste').
+        print(
+            f"warning: requested injector={args.injector!r} unavailable, using {typer.mode}",
+            file=sys.stderr,
+            flush=True,
+        )
     print(f"injector={typer.mode}", file=sys.stderr, flush=True)
 
     def render_target() -> str:
