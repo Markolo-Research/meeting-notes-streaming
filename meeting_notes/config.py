@@ -27,6 +27,9 @@ class AppConfig:
     ollama_model: str = "llama3.2:3b"
     
     # Other settings
+    transcription_backend: str = "whisper"  # "whisper" (batch) or "parakeet" (streaming)
+    parakeet_socket: str = "/tmp/parakeet-stream.sock"
+    parakeet_autostart: bool = True
     whisper_model: str = "base"
     notes_dir: str = "notes"
     recordings_dir: str = "recordings"
@@ -180,6 +183,11 @@ def validate_config(config: AppConfig) -> tuple[bool, Optional[str]]:
         if config.ai_model not in valid_models:
             return False, f"Invalid ai_model for OpenRouter: {config.ai_model}. Must be one of {valid_models}"
     
+    # Validate transcription backend
+    valid_backends = ["whisper", "parakeet"]
+    if config.transcription_backend not in valid_backends:
+        return False, f"Invalid transcription_backend: {config.transcription_backend}. Must be one of {valid_backends}"
+
     # Validate whisper model
     valid_whisper = ["tiny", "base", "small", "medium", "large"]
     if config.whisper_model not in valid_whisper:

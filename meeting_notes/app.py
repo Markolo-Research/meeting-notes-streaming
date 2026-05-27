@@ -24,6 +24,11 @@ from meeting_notes.note_maker import NoteMaker
 from meeting_notes.config import load_config, save_config, AppConfig, validate_config
 from meeting_notes.settings import SettingsScreen
 from meeting_notes.logger import setup_logging, get_logger
+from meeting_notes.parakeet_stream import (
+    StreamingAudioRecorder,
+    StreamResult,
+    ensure_server_running,
+)
 
 # Initialize logging
 setup_logging(debug=False)
@@ -56,11 +61,15 @@ class RecordingView(Container):
                     # Optional title input
                     yield Static("Meeting Title (optional):", id="title-label")
                     yield Input(placeholder="Enter meeting title...", id="meeting-title-input")
-                    
+
                     # User notes area
                     yield Static("Your Notes:", id="notes-label")
                     yield TextArea(id="user-notes-input", language="markdown")
-            
+
+            # Live partial transcript (visible only when streaming backend is active)
+            yield Static("Live transcript:", id="live-transcript-label")
+            yield Static("", id="live-transcript")
+
             # Instruction hints at the bottom (full width)
             yield Static("Press 's' to stop and process recording", id="stop-hint")
             yield Static("Press 'x' to cancel and discard recording", id="cancel-hint")
@@ -624,6 +633,22 @@ class MeetingNotesApp(App):
         height: 1fr;
     }
     
+    #live-transcript-label {
+        color: $text-muted;
+        margin: 1 2 0 2;
+    }
+
+    #live-transcript {
+        height: auto;
+        min-height: 3;
+        max-height: 8;
+        color: $accent;
+        padding: 1 2;
+        background: $panel;
+        border: solid $primary;
+        margin: 0 2 1 2;
+    }
+
     #stop-hint, #cancel-hint, #esc-hint {
         text-align: center;
         color: $text-muted;
@@ -684,8 +709,10 @@ class MeetingNotesApp(App):
             print("Using default values for invalid settings")
         
         # Initialize components with config values
-        self.recorder: Optional[AudioRecorder] = None
+        self.recorder = None  # AudioRecorder or StreamingAudioRecorder, set in on_mount
         self.transcriber = WhisperTranscriber(self.config.whisper_model)
+        self._parakeet_server_proc = None
+        self._last_stream_result: Optional[StreamResult] = None
         
         # Get appropriate API key based on provider (check config first, then env vars)
         api_key = None
@@ -712,6 +739,107 @@ class MeetingNotesApp(App):
 
         # Clean up old recordings on startup
         self._cleanup_old_recordings()
+
+    def _build_recorder(self):
+        """Construct the recorder backend based on transcription_backend config."""
+        if self.config.transcription_backend == "parakeet":
+            logger.info("Initializing streaming Parakeet recorder (mic-only)")
+            if self.config.parakeet_autostart:
+                try:
+                    self._parakeet_server_proc = ensure_server_running(
+                        socket_path=self.config.parakeet_socket
+                    )
+                    if self._parakeet_server_proc:
+                        logger.info("Spawned parakeet-stream-server (owned)")
+                except (FileNotFoundError, TimeoutError, RuntimeError) as exc:
+                    logger.error(f"Failed to start parakeet server: {exc}")
+                    self.notify(
+                        f"Parakeet server unavailable: {exc}. Falling back to Whisper.",
+                        severity="warning",
+                    )
+                    return AudioRecorder(
+                        output_dir=self.config.recordings_dir,
+                        mode=self.config.recording_mode,
+                        dev_mode=self.dev_mode,
+                    )
+            recorder = StreamingAudioRecorder(
+                output_dir=self.config.recordings_dir,
+                socket_path=self.config.parakeet_socket,
+                dev_mode=self.dev_mode,
+            )
+            recorder.set_on_partial(self._on_stream_partial)
+            return recorder
+        logger.info(f"Initializing audio recorder (mode: {self.config.recording_mode})")
+        return AudioRecorder(
+            output_dir=self.config.recordings_dir,
+            mode=self.config.recording_mode,
+            dev_mode=self.dev_mode,
+        )
+
+    def _format_partials(self, stream_result: StreamResult, final_text: str, duration: float) -> str:
+        """Synthesize timestamped paragraphs from the streaming partials.
+
+        Each time the partial text extends (gets longer), we treat the new
+        suffix as having "appeared" at the wall-clock elapsed time of that
+        partial. We then break the final text into ~30s windows using those
+        appearance times. If no usable partials, fall back to a single block.
+        """
+        partials = [p for p in stream_result.partials if p.text]
+        if not partials:
+            ts = f"{int(0 // 60):02d}:{int(0 % 60):02d}"
+            return f"**[{ts}]** {final_text.strip()}"
+
+        # Tokenize final text; for each token estimate the partial in which it
+        # first appeared by matching prefixes.
+        tokens = final_text.split()
+        if not tokens:
+            return ""
+
+        appearance: list[float] = [0.0] * len(tokens)
+        for idx in range(len(tokens)):
+            prefix = " ".join(tokens[: idx + 1])
+            t_appear = partials[-1].elapsed_s  # default to last partial
+            for p in partials:
+                if p.text.split()[: idx + 1] == tokens[: idx + 1]:
+                    t_appear = p.elapsed_s
+                    break
+            appearance[idx] = t_appear
+
+        # Group tokens into ~30s windows starting at each window start time.
+        window_s = 30.0
+        groups: list[tuple[float, list[str]]] = []
+        cur_start = appearance[0]
+        cur_words: list[str] = []
+        for tok, t in zip(tokens, appearance, strict=True):
+            if not cur_words:
+                cur_start = t
+            if t - cur_start > window_s and cur_words:
+                groups.append((cur_start, cur_words))
+                cur_start = t
+                cur_words = [tok]
+            else:
+                cur_words.append(tok)
+        if cur_words:
+            groups.append((cur_start, cur_words))
+
+        return "\n\n".join(
+            f"**[{int(start // 60):02d}:{int(start % 60):02d}]** {' '.join(words)}"
+            for start, words in groups
+        )
+
+    def _on_stream_partial(self, text: str) -> None:
+        """Callback from streaming client (called on recv thread)."""
+        try:
+            self.call_from_thread(self._update_live_transcript, text)
+        except Exception:
+            pass  # App may not be ready / shutting down
+
+    def _update_live_transcript(self, text: str) -> None:
+        try:
+            widget = self.query_one("#live-transcript", Static)
+            widget.update(text or "[dim](listening…)[/dim]")
+        except Exception:
+            pass
 
     def _cleanup_old_recordings(self) -> None:
         """Delete .wav recordings older than recording_retention_days.
@@ -766,12 +894,7 @@ class MeetingNotesApp(App):
         self.load_meetings()
         
         # Initialize recorder with config
-        logger.info(f"Initializing audio recorder (mode: {self.config.recording_mode})")
-        self.recorder = AudioRecorder(
-            output_dir=self.config.recordings_dir,
-            mode=self.config.recording_mode,
-            dev_mode=self.dev_mode
-        )
+        self.recorder = self._build_recorder()
         
         # Clear status file on startup
         self._write_status_file("idle")
@@ -795,11 +918,19 @@ class MeetingNotesApp(App):
                 self.recorder.stop_recording()
             except Exception:
                 pass  # Ignore errors during shutdown
-        
+
         # Stop timer if running
         if self.timer_interval:
             try:
                 self.timer_interval.stop()
+            except Exception:
+                pass
+
+        # If we spawned the parakeet server, shut it down too
+        if getattr(self, "_parakeet_server_proc", None):
+            try:
+                self._parakeet_server_proc.terminate()
+                self._parakeet_server_proc.wait(timeout=3)
             except Exception:
                 pass
     
@@ -1025,8 +1156,14 @@ class MeetingNotesApp(App):
                     self.timer_interval.stop()
                     self.timer_interval = None
                 
-                # Stop recording
-                audio_path = self.recorder.stop_recording()
+                # Stop recording (StreamingAudioRecorder returns StreamResult; AudioRecorder returns path)
+                stop_result = self.recorder.stop_recording()
+                if isinstance(stop_result, StreamResult):
+                    audio_path = stop_result.audio_path
+                    self._last_stream_result = stop_result
+                else:
+                    audio_path = stop_result
+                    self._last_stream_result = None
                 self.is_recording = False
                 self.recording_start_time = None
                 logger.info(f"Recording stopped. Audio saved to: {audio_path}")
@@ -1062,31 +1199,46 @@ class MeetingNotesApp(App):
         """Process recording in background thread."""
         logger.info(f"Processing recording: {audio_path}")
         try:
-            # Load Whisper model (if not already loaded)
-            logger.info("Loading Whisper model")
-            self.call_from_thread(self.notify, f"Loading Whisper {self.config.whisper_model} model...", severity="information")
-            self.transcriber.load_model()
-            
-            # Transcribe
-            logger.info("Starting transcription")
-            self.call_from_thread(self.notify, "Transcribing audio (this may take a few minutes)...", severity="information")
-            result = self.transcriber.transcribe(audio_path)
-            
-            word_count = len(result.text.split())
-            logger.info(f"Transcription complete: {word_count} words")
-            self.call_from_thread(self.notify, f"✓ Transcribed {word_count} words. Generating AI summary...", severity="information")
-            
-            # Format transcript
-            formatted = '\n\n'.join([
-                f'**[{int(seg.start // 60):02d}:{int(seg.start % 60):02d}]** {seg.text.strip()}'
-                for seg in result.segments
-            ])
-            
+            stream_result = self._last_stream_result
+            self._last_stream_result = None
+
+            if stream_result is not None and stream_result.final_text is not None:
+                # Streaming Parakeet produced a final transcript — skip Whisper
+                text = stream_result.final_text.strip()
+                duration = stream_result.duration_s
+                formatted = self._format_partials(stream_result, text, duration)
+                word_count = len(text.split())
+                logger.info(f"Parakeet streaming transcript: {word_count} words, {duration:.1f}s")
+                self.call_from_thread(
+                    self.notify,
+                    f"✓ Streamed transcript: {word_count} words. Generating AI summary...",
+                    severity="information",
+                )
+            else:
+                # Fall back to Whisper (or this run never used streaming)
+                logger.info("Loading Whisper model")
+                self.call_from_thread(self.notify, f"Loading Whisper {self.config.whisper_model} model...", severity="information")
+                self.transcriber.load_model()
+
+                logger.info("Starting transcription")
+                self.call_from_thread(self.notify, "Transcribing audio (this may take a few minutes)...", severity="information")
+                result = self.transcriber.transcribe(audio_path)
+
+                text = result.text
+                word_count = len(text.split())
+                logger.info(f"Transcription complete: {word_count} words")
+                self.call_from_thread(self.notify, f"✓ Transcribed {word_count} words. Generating AI summary...", severity="information")
+
+                formatted = '\n\n'.join([
+                    f'**[{int(seg.start // 60):02d}:{int(seg.start % 60):02d}]** {seg.text.strip()}'
+                    for seg in result.segments
+                ])
+                duration = result.segments[-1].end if result.segments else 0
+
             # Generate note with AI summary (pass custom title if provided)
             logger.info("Creating note with AI summary")
-            duration = result.segments[-1].end if result.segments else 0
             note_path, transcript_path, ai_error = self.note_maker.create_note(
-                transcript_text=result.text,
+                transcript_text=text,
                 formatted_transcript=formatted,
                 duration=duration,
                 title=meeting_title,
@@ -1614,11 +1766,7 @@ class MeetingNotesApp(App):
             
             # Reinitialize recorder if not currently recording
             if not self.is_recording:
-                self.recorder = AudioRecorder(
-                    output_dir=self.config.recordings_dir,
-                    mode=self.config.recording_mode,
-                    dev_mode=self.dev_mode
-                )
+                self.recorder = self._build_recorder()
             
             # Reload meetings from potentially new directory
             self.load_meetings()
