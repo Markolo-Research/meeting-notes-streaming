@@ -39,11 +39,17 @@ def common_prefix_len(a: str, b: str) -> int:
 
 
 class Typer:
-    """wtype frontend with diff-against-last-typed."""
+    """wtype frontend with diff-against-last-typed.
 
-    def __init__(self, enabled: bool):
+    key_delay_ms sets wtype's inter-keystroke delay. Some apps (Electron,
+    Chromium, GTK4) drop events on fast bursts — spaces tend to be the
+    visible casualty. Default 5ms is reliable without being noticeable.
+    """
+
+    def __init__(self, enabled: bool, key_delay_ms: int):
         self.enabled = enabled and shutil.which("wtype") is not None
         self.visible = ""
+        self.delay_args = ["-d", str(key_delay_ms)] if key_delay_ms > 0 else []
 
     def set_target(self, target: str) -> None:
         if not self.enabled:
@@ -52,13 +58,13 @@ class Typer:
         prefix = common_prefix_len(self.visible, target)
         backspaces = len(self.visible) - prefix
         if backspaces > 0:
-            args = ["wtype"]
+            args = ["wtype", *self.delay_args]
             for _ in range(backspaces):
                 args.extend(["-k", "BackSpace"])
             subprocess.run(args, check=False)
         suffix = target[prefix:]
         if suffix:
-            subprocess.run(["wtype", suffix], check=False)
+            subprocess.run(["wtype", *self.delay_args, suffix], check=False)
         self.visible = target
 
     def typed_chars(self) -> int:
@@ -111,6 +117,9 @@ def main() -> int:
     p.add_argument("--copy", action="store_true",
                    help="On exit, copy final transcript to clipboard via wl-copy")
     p.add_argument("--connect-timeout", type=float, default=45.0)
+    p.add_argument("--key-delay-ms", type=int,
+                   default=int(os.environ.get("PARAKEET_RT_KEY_DELAY_MS", "5")),
+                   help="wtype -d delay between keystrokes in ms (default 5)")
     args = p.parse_args()
 
     if not wait_for_socket(args.socket, args.connect_timeout):
@@ -125,7 +134,7 @@ def main() -> int:
     state_lock = threading.Lock()
     finals: list[str] = []
     current_partial = ""
-    typer = Typer(enabled=not args.no_live_type)
+    typer = Typer(enabled=not args.no_live_type, key_delay_ms=args.key_delay_ms)
 
     def render_target() -> str:
         parts = finals + ([current_partial] if current_partial else [])
