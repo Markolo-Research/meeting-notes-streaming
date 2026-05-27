@@ -17,6 +17,9 @@ from textual.binding import Binding
 from textual.reactive import reactive
 from textual.screen import Screen, ModalScreen
 from textual import work
+from rich.markup import escape as _rich_escape
+
+_LIVE_TRANSCRIPT_TAIL_CHARS = 320  # shown per channel in the live preview
 
 from meeting_notes.recorder import AudioRecorder
 from meeting_notes.transcriber import WhisperTranscriber
@@ -25,6 +28,7 @@ from meeting_notes.config import load_config, save_config, AppConfig, validate_c
 from meeting_notes.settings import SettingsScreen
 from meeting_notes.logger import setup_logging, get_logger
 from meeting_notes.parakeet_stream import (
+    Partial,
     StreamingAudioRecorder,
     StreamResult,
     ensure_server_running,
@@ -35,10 +39,40 @@ setup_logging(debug=False)
 logger = get_logger(__name__)
 
 
-class RecordingView(Container):
+def _tokens_with_times(partials: list[Partial], final_text: str) -> tuple[list[str], list[float]]:
+    """Map each token in `final_text` to the elapsed-seconds time at which
+    it first appeared in the partial timeline.
+
+    Tokens that never appeared (e.g. punctuation added at finalize) inherit
+    the time of the last partial.
+    """
+    tokens = final_text.split()
+    if not tokens:
+        return [], []
+    cleaned = [p for p in partials if p.text]
+    if not cleaned:
+        return tokens, [0.0] * len(tokens)
+    fallback_t = cleaned[-1].elapsed_s
+    times: list[float] = [fallback_t] * len(tokens)
+    for idx in range(len(tokens)):
+        prefix = tokens[: idx + 1]
+        for p in cleaned:
+            if p.text.split()[: idx + 1] == prefix:
+                times[idx] = p.elapsed_s
+                break
+    return tokens, times
+
+
+class RecordingView(Container, can_focus=True):
     """Full-screen view shown during active recording."""
-    
+
     elapsed_time = reactive(0)  # seconds
+
+    def on_mount(self) -> None:
+        # Take focus ourselves so 's'/'x' work immediately. Without this,
+        # hiding #main-panels would move focus to our title Input, and the
+        # 's' keystroke would type into the field instead of stopping.
+        self.focus()
     
     def compose(self) -> ComposeResult:
         """Build the recording view UI."""
@@ -202,8 +236,17 @@ class NoteViewer(ScrollableContainer):
                 content += "\n\n---\n\n*This is an old format note. The transcript has been hidden. Press 't' to view in a separate window.*"
             
             self.remove_children()
-            self.mount(Static(content))
-            
+            # Use a read-only TextArea so users can move the cursor and
+            # Shift+arrow / Ctrl+A to select text for copy. soft_wrap keeps
+            # long lines visible without horizontal scrolling.
+            self.mount(TextArea(
+                content,
+                read_only=True,
+                soft_wrap=True,
+                show_cursor=True,
+                id="note-viewer-text",
+            ))
+
         except Exception as e:
             self.remove_children()
             self.mount(Static(f"[red]Error loading note:[/red] {e}"))
@@ -378,7 +421,7 @@ class TranscriptViewer(ModalScreen):
             
             try:
                 content = self.transcript_path.read_text()
-                yield ScrollableContainer(Static(content), id="transcript-content")
+                yield ScrollableContainer(Static(content, markup=False), id="transcript-content")
             except Exception as e:
                 yield Static(f"[red]Error loading transcript:[/red] {e}", id="transcript-content")
             
@@ -769,6 +812,8 @@ class MeetingNotesApp(App):
                 dev_mode=self.dev_mode,
             )
             recorder.set_on_partial(self._on_stream_partial)
+            if self.config.recording_mode == "combined":
+                recorder.set_on_partial_secondary(self._on_stream_partial_secondary)
             return recorder
         logger.info(f"Initializing audio recorder (mode: {self.config.recording_mode})")
         return AudioRecorder(
@@ -778,40 +823,18 @@ class MeetingNotesApp(App):
         )
 
     def _format_partials(self, stream_result: StreamResult, final_text: str, duration: float) -> str:
-        """Synthesize timestamped paragraphs from the streaming partials.
-
-        Each time the partial text extends (gets longer), we treat the new
-        suffix as having "appeared" at the wall-clock elapsed time of that
-        partial. We then break the final text into ~30s windows using those
-        appearance times. If no usable partials, fall back to a single block.
-        """
-        partials = [p for p in stream_result.partials if p.text]
-        if not partials:
-            ts = f"{int(0 // 60):02d}:{int(0 % 60):02d}"
-            return f"**[{ts}]** {final_text.strip()}"
-
-        # Tokenize final text; for each token estimate the partial in which it
-        # first appeared by matching prefixes.
-        tokens = final_text.split()
+        """Single-speaker formatter: timestamped paragraphs from partial timeline."""
+        tokens, times = _tokens_with_times(stream_result.partials, final_text)
         if not tokens:
-            return ""
-
-        appearance: list[float] = [0.0] * len(tokens)
-        for idx in range(len(tokens)):
-            prefix = " ".join(tokens[: idx + 1])
-            t_appear = partials[-1].elapsed_s  # default to last partial
-            for p in partials:
-                if p.text.split()[: idx + 1] == tokens[: idx + 1]:
-                    t_appear = p.elapsed_s
-                    break
-            appearance[idx] = t_appear
+            ts = f"{int(0 // 60):02d}:{int(0 % 60):02d}"
+            return f"**[{ts}]** {final_text.strip()}" if final_text.strip() else ""
 
         # Group tokens into ~30s windows starting at each window start time.
         window_s = 30.0
         groups: list[tuple[float, list[str]]] = []
-        cur_start = appearance[0]
+        cur_start = times[0]
         cur_words: list[str] = []
-        for tok, t in zip(tokens, appearance, strict=True):
+        for tok, t in zip(tokens, times, strict=True):
             if not cur_words:
                 cur_start = t
             if t - cur_start > window_s and cur_words:
@@ -829,18 +852,96 @@ class MeetingNotesApp(App):
         )
 
     def _on_stream_partial(self, text: str) -> None:
-        """Callback from streaming client (called on recv thread)."""
+        """Callback from the mic ("you") streaming client (on recv thread)."""
+        self._latest_partial_you = text
         try:
-            self.call_from_thread(self._update_live_transcript, text)
+            self.call_from_thread(self._refresh_live_transcript)
         except Exception:
             pass  # App may not be ready / shutting down
 
-    def _update_live_transcript(self, text: str) -> None:
+    def _on_stream_partial_secondary(self, text: str) -> None:
+        """Callback from the system ("them") streaming client (on recv thread)."""
+        self._latest_partial_them = text
         try:
-            widget = self.query_one("#live-transcript", Static)
-            widget.update(text or "[dim](listening…)[/dim]")
+            self.call_from_thread(self._refresh_live_transcript)
         except Exception:
             pass
+
+    def _refresh_live_transcript(self) -> None:
+        try:
+            widget = self.query_one("#live-transcript", Static)
+        except Exception:
+            return
+
+        def _tail(text: str) -> str:
+            # Server-emitted partials grow monotonically (full transcript so
+            # far). Show only the recent tail so the fixed-height widget
+            # always reflects the latest words instead of clipping them
+            # off-screen. Escape Rich markup so brackets in speech can't
+            # break parsing.
+            if len(text) > _LIVE_TRANSCRIPT_TAIL_CHARS:
+                text = "…" + text[-(_LIVE_TRANSCRIPT_TAIL_CHARS - 1):]
+            return _rich_escape(text)
+
+        you = getattr(self, "_latest_partial_you", "") or ""
+        them = getattr(self, "_latest_partial_them", "") or ""
+        if not you and not them:
+            widget.update("[dim](listening…)[/dim]")
+            return
+        if self.config.recording_mode == "combined":
+            you_line = f"[bold cyan]\\[you][/bold cyan] {_tail(you)}" if you else "[dim]\\[you] …[/dim]"
+            them_line = f"[bold magenta]\\[them][/bold magenta] {_tail(them)}" if them else "[dim]\\[them] …[/dim]"
+            widget.update(f"{you_line}\n{them_line}")
+        else:
+            widget.update(_tail(you) if you else (_tail(them) if them else "[dim](listening…)[/dim]"))
+
+    def _format_speaker_partials(
+        self,
+        stream_result: StreamResult,
+        you_final: str,
+        them_final: str,
+        duration: float,
+    ) -> tuple[str, str]:
+        """Merge two speaker timelines into chronological transcripts.
+
+        Returns ``(formatted, plain)``: the first has bold ``[mm:ss]``
+        timestamps for the note body, the second has just ``[you]``/``[them]``
+        labels for the AI summarizer.
+
+        Each token's appearance time is approximated from the partial in
+        which it first showed up (same approach as the single-speaker
+        formatter). We then walk both speaker timelines together and split
+        on speaker change.
+        """
+        you_tokens, you_times = _tokens_with_times(stream_result.partials, you_final)
+        them_tokens, them_times = _tokens_with_times(stream_result.secondary_partials, them_final)
+
+        timeline: list[tuple[float, str, str]] = []
+        for tok, t in zip(you_tokens, you_times, strict=True):
+            timeline.append((t, "you", tok))
+        for tok, t in zip(them_tokens, them_times, strict=True):
+            timeline.append((t, "them", tok))
+        if not timeline:
+            return "", ""
+        timeline.sort(key=lambda x: x[0])
+
+        groups: list[tuple[float, str, list[str]]] = []
+        cur_start, cur_speaker, cur_words = timeline[0][0], timeline[0][1], [timeline[0][2]]
+        for t, speaker, tok in timeline[1:]:
+            if speaker != cur_speaker:
+                groups.append((cur_start, cur_speaker, cur_words))
+                cur_start, cur_speaker, cur_words = t, speaker, [tok]
+            else:
+                cur_words.append(tok)
+        groups.append((cur_start, cur_speaker, cur_words))
+
+        label = {"you": "[you]", "them": "[them]"}
+        formatted = "\n\n".join(
+            f"**[{int(start // 60):02d}:{int(start % 60):02d}]** {label[sp]} {' '.join(words)}"
+            for start, sp, words in groups
+        )
+        plain = "\n".join(f"{label[sp]} {' '.join(words)}" for _, sp, words in groups)
+        return formatted, plain
 
     def _cleanup_old_recordings(self) -> None:
         """Delete .wav recordings older than recording_retention_days.
@@ -1088,112 +1189,125 @@ class MeetingNotesApp(App):
                     pass
     
     def action_cancel_recording(self) -> None:
-        """Cancel recording and discard without processing."""
+        """Cancel recording and discard without processing.
+
+        Tears the UI down immediately and runs the blocking stop on a worker.
+        """
         logger.info("Cancelling recording")
         if not self.is_recording or not self.recorder:
             return
-        
         try:
-            # Stop timer
             if self.timer_interval:
                 self.timer_interval.stop()
                 self.timer_interval = None
-            
-            # Stop and discard recording
-            self.recorder.stop_recording()
+
             self.is_recording = False
             self.recording_start_time = None
-            logger.info("Recording cancelled successfully")
-            
-            # Update status back to idle
-            self._write_status_file("idle")
-            
-            # Remove recording view
+
             try:
                 recording_view = self.query_one(RecordingView)
                 recording_view.remove()
             except Exception:
                 pass
-            
-            # Show main panels
-            main_panels = self.query_one("#main-panels", Container)
-            main_panels.display = True
-            
-            # Update footer bindings
+            try:
+                main_panels = self.query_one("#main-panels", Container)
+                main_panels.display = True
+            except Exception:
+                pass
             self.refresh_bindings()
-            
-            # Notify user
             self.notify("Recording cancelled", severity="warning")
-            
+            self._write_status_file("idle")
+
+            self._discard_recording()
         except Exception as e:
             logger.error(f"Failed to cancel recording: {e}", exc_info=True)
             self.notify(f"Failed to cancel recording: {e}", severity="error")
+
+    @work(exclusive=False, thread=True)
+    def _discard_recording(self) -> None:
+        """Worker: tear down the recorder process/socket off the UI thread."""
+        try:
+            self.recorder.stop_recording()
+            logger.info("Recording cancelled successfully")
+        except Exception as e:
+            logger.error(f"Failed to discard recording on worker: {e}", exc_info=True)
     
     def action_stop_recording(self) -> None:
-        """Stop recording, get title if provided, and process."""
+        """Stop recording, get title if provided, and process.
+
+        Tears down the recording view immediately so the UI never freezes
+        on the (potentially slow) capture+ASR shutdown. The actual
+        stop_recording() blocking call happens on a worker thread.
+        """
         logger.info("Stopping recording")
-        if self.recorder and self.recorder.is_recording():
+        if not (self.recorder and self.recorder.is_recording()):
+            return
+        try:
+            # Read title and notes from the recording view before tearing it down.
+            meeting_title = None
+            user_notes = ""
             try:
-                # Get meeting title if provided
-                meeting_title = None
-                user_notes = ""
-                try:
-                    recording_view = self.query_one(RecordingView)
-                    title_input = recording_view.query_one("#meeting-title-input", Input)
-                    meeting_title = title_input.value.strip() if title_input.value else None
-                    if meeting_title:
-                        logger.info(f"Meeting title: {meeting_title}")
-                    
-                    # Get user notes from text area
-                    notes_input = recording_view.query_one("#user-notes-input", TextArea)
-                    user_notes = notes_input.text.strip() if notes_input.text else ""
-                    if user_notes:
-                        logger.info(f"User notes captured: {len(user_notes)} characters")
-                except Exception:
-                    pass  # No title input found
-                
-                # Stop timer
-                if self.timer_interval:
-                    self.timer_interval.stop()
-                    self.timer_interval = None
-                
-                # Stop recording (StreamingAudioRecorder returns StreamResult; AudioRecorder returns path)
-                stop_result = self.recorder.stop_recording()
-                if isinstance(stop_result, StreamResult):
-                    audio_path = stop_result.audio_path
-                    self._last_stream_result = stop_result
-                else:
-                    audio_path = stop_result
-                    self._last_stream_result = None
-                self.is_recording = False
-                self.recording_start_time = None
-                logger.info(f"Recording stopped. Audio saved to: {audio_path}")
-                
-                # Update status to processing
-                self._write_status_file("processing")
-                
-                # Remove recording view
-                try:
-                    recording_view = self.query_one(RecordingView)
-                    recording_view.remove()
-                except Exception:
-                    pass
-                
-                # Show main panels
+                recording_view = self.query_one(RecordingView)
+                title_input = recording_view.query_one("#meeting-title-input", Input)
+                meeting_title = title_input.value.strip() if title_input.value else None
+                if meeting_title:
+                    logger.info(f"Meeting title: {meeting_title}")
+                notes_input = recording_view.query_one("#user-notes-input", TextArea)
+                user_notes = notes_input.text.strip() if notes_input.text else ""
+                if user_notes:
+                    logger.info(f"User notes captured: {len(user_notes)} characters")
+            except Exception:
+                pass
+
+            if self.timer_interval:
+                self.timer_interval.stop()
+                self.timer_interval = None
+
+            self.is_recording = False
+            self.recording_start_time = None
+            self._write_status_file("processing")
+
+            # Tear down the recording view immediately — do not wait for ASR.
+            try:
+                recording_view = self.query_one(RecordingView)
+                recording_view.remove()
+            except Exception:
+                pass
+            try:
                 main_panels = self.query_one("#main-panels", Container)
                 main_panels.display = True
-                
-                # Update footer bindings
-                self.refresh_bindings()
-                
-                # Process in background
-                self.notify("Processing recording...", severity="information")
-                self.process_recording(audio_path, meeting_title, user_notes)
-                
-            except Exception as e:
-                logger.error(f"Failed to stop recording: {e}", exc_info=True)
-                self.notify(f"Failed to stop recording: {e}", severity="error")
-                self.is_recording = False
+            except Exception:
+                pass
+            self.refresh_bindings()
+            self.notify("Finalizing transcript…", severity="information")
+
+            # Run the blocking stop + downstream processing on a worker.
+            self._finalize_recording(meeting_title, user_notes)
+        except Exception as e:
+            logger.error(f"Failed to stop recording: {e}", exc_info=True)
+            self.notify(f"Failed to stop recording: {e}", severity="error")
+            self.is_recording = False
+
+    @work(exclusive=False, thread=True)
+    def _finalize_recording(self, meeting_title: Optional[str], user_notes: str) -> None:
+        """Worker: run recorder.stop_recording() off the UI thread, then process."""
+        try:
+            stop_result = self.recorder.stop_recording()
+        except Exception as e:
+            logger.error(f"Failed to stop recording on worker: {e}", exc_info=True)
+            self.call_from_thread(self.notify, f"Failed to stop recording: {e}", severity="error")
+            self._write_status_file("idle")
+            return
+
+        if isinstance(stop_result, StreamResult):
+            audio_path = stop_result.audio_path
+            self._last_stream_result = stop_result
+        else:
+            audio_path = stop_result
+            self._last_stream_result = None
+        logger.info(f"Recording stopped. Audio saved to: {audio_path}")
+
+        self.process_recording(audio_path, meeting_title, user_notes)
     
     @work(exclusive=True, thread=True)
     def process_recording(self, audio_path: str, meeting_title: Optional[str] = None, user_notes: str = "") -> None:
@@ -1205,9 +1319,20 @@ class MeetingNotesApp(App):
 
             if stream_result is not None and stream_result.final_text is not None:
                 # Streaming Parakeet produced a final transcript — skip Whisper
-                text = stream_result.final_text.strip()
+                you_text = stream_result.final_text.strip()
+                them_text = (stream_result.secondary_final or "").strip()
                 duration = stream_result.duration_s
-                formatted = self._format_partials(stream_result, text, duration)
+                if them_text or stream_result.secondary_partials:
+                    # Combined mode: produce a chronological [you]/[them] transcript.
+                    # `formatted` includes timestamps for the note body; `text` keeps
+                    # speaker labels but drops timestamps, so the AI summarizer can
+                    # attribute lines to each speaker.
+                    formatted, text = self._format_speaker_partials(
+                        stream_result, you_text, them_text, duration
+                    )
+                else:
+                    text = you_text
+                    formatted = self._format_partials(stream_result, text, duration)
                 word_count = len(text.split())
                 logger.info(f"Parakeet streaming transcript: {word_count} words, {duration:.1f}s")
                 self.call_from_thread(
@@ -1348,47 +1473,51 @@ class MeetingNotesApp(App):
             self.notify("No note selected", severity="warning")
     
     def action_copy_to_clipboard(self) -> None:
-        """Copy selected note to clipboard."""
+        """Copy the current selection from the note viewer, or the whole note if nothing is selected."""
         viewer = self.query_one("#note-viewer", NoteViewer)
-        if viewer.current_note:
-            try:
-                with open(viewer.current_note, 'r') as f:
-                    content = f.read()
-                
-                # Try clipboard tools in order: wl-copy (Wayland), xclip, xsel
-                import shutil
-                
-                if shutil.which('wl-copy'):
-                    # Wayland (Hyprland, Sway, etc.)
-                    process = subprocess.Popen(
-                        ['wl-copy'],
-                        stdin=subprocess.PIPE
-                    )
-                    process.communicate(content.encode())
-                    self.notify("✓ Copied to clipboard", severity="information")
-                elif shutil.which('xclip'):
-                    # X11 with xclip
-                    process = subprocess.Popen(
-                        ['xclip', '-selection', 'clipboard'],
-                        stdin=subprocess.PIPE
-                    )
-                    process.communicate(content.encode())
-                    self.notify("✓ Copied to clipboard", severity="information")
-                elif shutil.which('xsel'):
-                    # X11 with xsel
-                    process = subprocess.Popen(
-                        ['xsel', '--clipboard'],
-                        stdin=subprocess.PIPE
-                    )
-                    process.communicate(content.encode())
-                    self.notify("✓ Copied to clipboard", severity="information")
-                else:
-                    self.notify("Install wl-clipboard (Wayland) or xclip/xsel (X11)", severity="error")
-                    
-            except Exception as e:
-                self.notify(f"Failed to copy: {e}", severity="error")
-        else:
+        if not viewer.current_note:
             self.notify("No note selected", severity="warning")
+            return
+
+        # Prefer the active selection in the note's TextArea
+        selected = ""
+        try:
+            ta = self.query_one("#note-viewer-text", TextArea)
+            selected = ta.selected_text or ""
+        except Exception:
+            pass
+
+        if selected:
+            content = selected
+            label = f"✓ Copied {len(content)} chars from selection"
+        else:
+            with open(viewer.current_note, 'r') as f:
+                content = f.read()
+            label = "✓ Copied whole note"
+
+        if not self._copy_to_clipboard(content):
+            return
+        self.notify(label, severity="information")
+
+    def _copy_to_clipboard(self, content: str) -> bool:
+        """Pipe text to wl-copy / xclip / xsel. Returns True on success, notifies on failure."""
+        import shutil
+        if shutil.which('wl-copy'):
+            cmd = ['wl-copy']
+        elif shutil.which('xclip'):
+            cmd = ['xclip', '-selection', 'clipboard']
+        elif shutil.which('xsel'):
+            cmd = ['xsel', '--clipboard']
+        else:
+            self.notify("Install wl-clipboard (Wayland) or xclip/xsel (X11)", severity="error")
+            return False
+        try:
+            process = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+            process.communicate(content.encode())
+        except Exception as e:
+            self.notify(f"Failed to copy: {e}", severity="error")
+            return False
+        return True
     
     def action_show_in_folder(self) -> None:
         """Show selected note in file manager and focus on the file."""
@@ -1456,43 +1585,12 @@ class MeetingNotesApp(App):
     def action_copy_path(self) -> None:
         """Copy the full absolute path of the selected note to clipboard."""
         viewer = self.query_one("#note-viewer", NoteViewer)
-        if viewer.current_note:
-            try:
-                import shutil
-                file_path = str(viewer.current_note.absolute())
-                
-                # Try clipboard tools in order: wl-copy (Wayland), xclip, xsel
-                if shutil.which('wl-copy'):
-                    # Wayland (Hyprland, Sway, etc.)
-                    process = subprocess.Popen(
-                        ['wl-copy'],
-                        stdin=subprocess.PIPE
-                    )
-                    process.communicate(file_path.encode())
-                    self.notify(f"✓ Copied path to clipboard", severity="information")
-                elif shutil.which('xclip'):
-                    # X11 with xclip
-                    process = subprocess.Popen(
-                        ['xclip', '-selection', 'clipboard'],
-                        stdin=subprocess.PIPE
-                    )
-                    process.communicate(file_path.encode())
-                    self.notify(f"✓ Copied path to clipboard", severity="information")
-                elif shutil.which('xsel'):
-                    # X11 with xsel
-                    process = subprocess.Popen(
-                        ['xsel', '--clipboard'],
-                        stdin=subprocess.PIPE
-                    )
-                    process.communicate(file_path.encode())
-                    self.notify(f"✓ Copied path to clipboard", severity="information")
-                else:
-                    self.notify("Install wl-clipboard (Wayland) or xclip/xsel (X11)", severity="error")
-                    
-            except Exception as e:
-                self.notify(f"Failed to copy path: {e}", severity="error")
-        else:
+        if not viewer.current_note:
             self.notify("No note selected", severity="warning")
+            return
+        file_path = str(viewer.current_note.absolute())
+        if self._copy_to_clipboard(file_path):
+            self.notify("✓ Copied path to clipboard", severity="information")
     
     def action_delete_meeting(self) -> None:
         """Delete the selected meeting after confirmation."""

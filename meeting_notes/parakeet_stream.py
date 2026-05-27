@@ -15,10 +15,11 @@ final transcript plus a list of partials with timestamps.
 
 from __future__ import annotations
 
+import array
 import json
 import os
+import queue
 import shutil
-import signal
 import socket
 import subprocess
 import threading
@@ -36,6 +37,26 @@ logger = get_logger(__name__)
 DEFAULT_SOCKET = "/tmp/parakeet-stream.sock"
 SAMPLE_RATE = 16000
 PUMP_CHUNK_BYTES = 3200  # 100 ms @ 16 kHz mono s16le
+# ~30s worth of 100ms chunks. The streamer drops new chunks when full so the
+# wav backup is never blocked by a slow/stalled socket.
+STREAM_QUEUE_MAX = 300
+FINISH_TIMEOUT_S = 15.0
+
+
+def _deinterleave_stereo_s16le(data: bytes) -> tuple[bytes, bytes]:
+    """Split interleaved s16le stereo PCM into (left_mono, right_mono).
+
+    Each frame is 4 bytes: [L_lo L_hi R_lo R_hi]. Uses stdlib array for
+    a C-level stride, so this stays cheap even at full sample rate.
+    """
+    if len(data) % 4:
+        # Trim trailing partial frame; ffmpeg may flush an odd number on close.
+        data = data[: len(data) - (len(data) % 4)]
+    arr = array.array("h")
+    arr.frombytes(data)
+    left = array.array("h", arr[0::2]).tobytes()
+    right = array.array("h", arr[1::2]).tobytes()
+    return left, right
 
 
 @dataclass
@@ -50,6 +71,10 @@ class StreamResult:
     final_text: Optional[str]
     partials: list[Partial] = field(default_factory=list)
     duration_s: float = 0.0
+    # Combined mode only: separate ASR stream for the system-audio side.
+    # `final_text`/`partials` cover the mic ("you"); these cover system ("them").
+    secondary_final: Optional[str] = None
+    secondary_partials: list[Partial] = field(default_factory=list)
 
 
 class ParakeetStreamClient:
@@ -179,11 +204,15 @@ def ensure_server_running(
         raise FileNotFoundError(
             f"{launcher} not on PATH; install or set parakeet_socket"
         )
-    logger.info(f"Starting {launcher} (cold start, ~5s model load)")
+    log_dir = Path.home() / ".cache" / "parakeet-stream"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "server.log"
+    logger.info(f"Starting {launcher} (cold start, ~5s model load); log → {log_path}")
+    log_fp = log_path.open("ab")
     proc = subprocess.Popen(
         [launcher, "--foreground"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=log_fp,
+        stderr=subprocess.STDOUT,
         start_new_session=True,
     )
     deadline = time.time() + boot_timeout
@@ -239,14 +268,29 @@ class StreamingAudioRecorder:
 
         self.current_file: Optional[Path] = None
         self.process: Optional[subprocess.Popen] = None
+        # Primary client is the mic ("you") channel in combined mode; the
+        # only channel in mic/system modes.
         self.client: Optional[ParakeetStreamClient] = None
+        # Secondary client = system audio ("them"), only used in combined mode.
+        self.secondary_client: Optional[ParakeetStreamClient] = None
         self._pump_thread: Optional[threading.Thread] = None
+        self._streamer_thread: Optional[threading.Thread] = None
+        self._streamer_thread_secondary: Optional[threading.Thread] = None
+        self._stream_queue: Optional[queue.Queue] = None
+        self._stream_queue_secondary: Optional[queue.Queue] = None
+        self._dropped_chunks = 0
+        self._dropped_chunks_secondary = 0
         self._wav: Optional[wave.Wave_write] = None
         self._stop_pump = threading.Event()
         self._on_partial: Optional[Callable[[str], None]] = None
+        self._on_partial_secondary: Optional[Callable[[str], None]] = None
 
     def set_on_partial(self, cb: Optional[Callable[[str], None]]) -> None:
         self._on_partial = cb
+
+    def set_on_partial_secondary(self, cb: Optional[Callable[[str], None]]) -> None:
+        """Callback for system-audio partials in combined mode ("them")."""
+        self._on_partial_secondary = cb
 
     def start_recording(self, filename: Optional[str] = None) -> str:
         if self.is_recording():
@@ -258,13 +302,19 @@ class StreamingAudioRecorder:
         self.current_file = self.output_dir / filename
         logger.info(f"Streaming recording to: {self.current_file}")
 
+        stereo = self.mode == "combined"
         self._wav = wave.open(str(self.current_file), "wb")
-        self._wav.setnchannels(1)
+        self._wav.setnchannels(2 if stereo else 1)
         self._wav.setsampwidth(2)
         self._wav.setframerate(SAMPLE_RATE)
 
         self.client = ParakeetStreamClient(self.socket_path, on_partial=self._on_partial)
         self.client.connect()
+        if stereo:
+            self.secondary_client = ParakeetStreamClient(
+                self.socket_path, on_partial=self._on_partial_secondary
+            )
+            self.secondary_client.connect()
 
         cmd = self._build_capture_cmd()
         logger.debug(f"Capture cmd: {' '.join(cmd)}")
@@ -272,17 +322,45 @@ class StreamingAudioRecorder:
             cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
         )
         self._stop_pump.clear()
-        self._pump_thread = threading.Thread(target=self._pump, daemon=True)
+        # Allocate every queue and streamer first; only then start the pump
+        # so it never reads a None secondary queue before we've set it up.
+        self._stream_queue = queue.Queue(maxsize=STREAM_QUEUE_MAX)
+        self._dropped_chunks = 0
+        self._streamer_thread = threading.Thread(
+            target=self._streamer,
+            args=(self._stream_queue, self.client, "mic"),
+            daemon=True,
+        )
+        if stereo:
+            self._stream_queue_secondary = queue.Queue(maxsize=STREAM_QUEUE_MAX)
+            self._dropped_chunks_secondary = 0
+            self._streamer_thread_secondary = threading.Thread(
+                target=self._streamer,
+                args=(self._stream_queue_secondary, self.secondary_client, "sys"),
+                daemon=True,
+            )
+        self._pump_thread = threading.Thread(
+            target=self._pump_stereo if stereo else self._pump, daemon=True
+        )
+
+        self._streamer_thread.start()
+        if stereo:
+            self._streamer_thread_secondary.start()
         self._pump_thread.start()
         return str(self.current_file)
 
     def _build_capture_cmd(self) -> list[str]:
-        """Single ffmpeg invocation that captures + mixes + downsamples to
-        s16le 16 kHz mono on stdout. Mode controls which inputs are wired."""
+        """Single ffmpeg invocation that captures + downsamples to s16le
+        16 kHz on stdout.
+
+        - mic / system modes: mono.
+        - combined mode: stereo with mic on left, system on right, so the
+          pump can split them and route each to its own ASR session.
+        """
         if not shutil.which("ffmpeg"):
             raise RuntimeError("ffmpeg not found on PATH")
 
-        common_out = [
+        mono_out = [
             "-ar", str(SAMPLE_RATE),
             "-ac", "1",
             "-f", "s16le",
@@ -294,7 +372,7 @@ class StreamingAudioRecorder:
             return [
                 "ffmpeg", "-hide_banner", "-nostdin",
                 "-f", "pulse", "-i", "default",
-                *common_out,
+                *mono_out,
             ]
 
         monitor = self._default_sink_monitor()
@@ -302,20 +380,26 @@ class StreamingAudioRecorder:
             return [
                 "ffmpeg", "-hide_banner", "-nostdin",
                 "-f", "pulse", "-i", monitor,
-                *common_out,
+                *mono_out,
             ]
 
-        # combined: mix mic + system live with the same filter graph the
-        # whisper-mode post-mix uses (volume=2.0 each, amix, no normalize).
+        # combined: keep mic and system as independent channels so the
+        # recorder can split them and feed two ASR sessions in parallel.
+        # Output is interleaved 16-bit stereo @ 16 kHz: L=mic, R=system.
         return [
             "ffmpeg", "-hide_banner", "-nostdin",
             "-f", "pulse", "-i", "default",
             "-f", "pulse", "-i", monitor,
             "-filter_complex",
-            "[0:a]volume=2.0[a0];[1:a]volume=2.0[a1];"
-            "[a0][a1]amix=inputs=2:duration=longest:normalize=0[out]",
+            "[0:a]aresample=16000,aformat=channel_layouts=mono,volume=2.0[mic];"
+            "[1:a]aresample=16000,aformat=channel_layouts=mono,volume=2.0[sys];"
+            "[mic][sys]join=inputs=2:channel_layout=stereo[out]",
             "-map", "[out]",
-            *common_out,
+            "-ar", str(SAMPLE_RATE),
+            "-ac", "2",
+            "-f", "s16le",
+            "-loglevel", "warning",
+            "pipe:1",
         ]
 
     @staticmethod
@@ -338,8 +422,16 @@ class StreamingAudioRecorder:
         return "@DEFAULT_MONITOR@"
 
     def _pump(self) -> None:
-        assert self.process is not None and self._wav is not None and self.client is not None
+        """Mono pump: read PCM from ffmpeg, write to wav, hand off to streamer.
+
+        Wav write is local + fast and must never block. We push each chunk
+        to a bounded queue for the streamer to send to the socket. If the
+        queue is full (server slow/stalled), the chunk is dropped on the
+        stream side so the wav backup keeps up.
+        """
+        assert self.process is not None and self._wav is not None
         stdout = self.process.stdout
+        q = self._stream_queue
         while not self._stop_pump.is_set():
             try:
                 data = stdout.read(PUMP_CHUNK_BYTES)
@@ -348,28 +440,88 @@ class StreamingAudioRecorder:
             if not data:
                 break
             self._wav.writeframesraw(data)
-            self.client.send_pcm(data)
+            self._enqueue_or_drop(q, data, channel="mic")
+
+    def _pump_stereo(self) -> None:
+        """Stereo pump (combined mode): write stereo backup, split L/R into
+        two mono streams, route to two ASR sessions."""
+        assert self.process is not None and self._wav is not None
+        stdout = self.process.stdout
+        mic_q = self._stream_queue
+        sys_q = self._stream_queue_secondary
+        # Read in stereo-aligned chunks (4 bytes/frame): mic L, sys R.
+        read_bytes = PUMP_CHUNK_BYTES * 2
+        while not self._stop_pump.is_set():
+            try:
+                data = stdout.read(read_bytes)
+            except (OSError, ValueError):
+                break
+            if not data:
+                break
+            self._wav.writeframesraw(data)
+            mic_pcm, sys_pcm = _deinterleave_stereo_s16le(data)
+            self._enqueue_or_drop(mic_q, mic_pcm, channel="mic")
+            self._enqueue_or_drop(sys_q, sys_pcm, channel="sys")
+
+    def _enqueue_or_drop(self, q: Optional[queue.Queue], data: bytes, channel: str) -> None:
+        if q is None or not data:
+            return
+        try:
+            q.put_nowait(data)
+        except queue.Full:
+            if channel == "mic":
+                self._dropped_chunks += 1
+                count = self._dropped_chunks
+            else:
+                self._dropped_chunks_secondary += 1
+                count = self._dropped_chunks_secondary
+            if count == 1 or count % 50 == 0:
+                logger.warning(
+                    f"{channel} stream queue full; dropped {count} chunks "
+                    "(server slow — wav backup unaffected)"
+                )
+
+    def _streamer(self, q: queue.Queue, client: ParakeetStreamClient, channel: str) -> None:
+        """Drain a queue → socket for one channel. Decoupled from the pump
+        so a slow/stalled server cannot block ffmpeg or the wav backup."""
+        while not self._stop_pump.is_set():
+            try:
+                data = q.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            if data is None:
+                break
+            if not client.send_pcm(data):
+                logger.warning(f"{channel} streamer: socket send failed; abandoning streaming")
+                while True:
+                    try:
+                        q.get_nowait()
+                    except queue.Empty:
+                        break
+                return
+        # Final drain on graceful stop
+        while True:
+            try:
+                data = q.get_nowait()
+            except queue.Empty:
+                break
+            if data is None:
+                continue
+            client.send_pcm(data)
 
     def stop_recording(self) -> StreamResult:
         if not self.is_recording():
             raise RuntimeError("Not currently recording")
         assert self.process is not None and self._wav is not None and self.client is not None
 
+        # SIGTERM first (SIGINT is unreliable with ffmpeg -nostdin); SIGKILL as fallback.
+        self.process.terminate()
         try:
-            self.process.send_signal(signal.SIGINT)
-            self.process.wait(timeout=5)
+            self.process.wait(timeout=2)
         except subprocess.TimeoutExpired:
-            logger.warning("Capture process did not exit on SIGINT; terminating")
-            self.process.terminate()
-            try:
-                self.process.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                self.process.kill()
-                self.process.wait()
-
-        self._stop_pump.set()
-        if self._pump_thread:
-            self._pump_thread.join(timeout=3)
+            logger.warning("Capture process did not exit on SIGTERM; killing")
+            self.process.kill()
+            self.process.wait()
 
         try:
             tail = self.process.stdout.read()
@@ -377,19 +529,74 @@ class StreamingAudioRecorder:
             tail = b""
         if tail:
             self._wav.writeframesraw(tail)
-            self.client.send_pcm(tail)
+            if self.mode == "combined":
+                mic_tail, sys_tail = _deinterleave_stereo_s16le(tail)
+                self._enqueue_or_drop(self._stream_queue, mic_tail, "mic")
+                self._enqueue_or_drop(self._stream_queue_secondary, sys_tail, "sys")
+            else:
+                self._enqueue_or_drop(self._stream_queue, tail, "mic")
+
+        self._stop_pump.set()
+        # Sentinels so streamers wake from queue.get immediately.
+        for q in (self._stream_queue, self._stream_queue_secondary):
+            if q is not None:
+                try:
+                    q.put_nowait(None)
+                except queue.Full:
+                    pass
+
+        if self._pump_thread:
+            self._pump_thread.join(timeout=2)
+        if self._streamer_thread:
+            self._streamer_thread.join(timeout=3)
+        if self._streamer_thread_secondary:
+            self._streamer_thread_secondary.join(timeout=3)
 
         self._wav.close()
         audio_path = str(self.current_file)
+        if self._dropped_chunks:
+            logger.warning(
+                f"mic streaming dropped {self._dropped_chunks} chunks; "
+                f"wav backup at {audio_path} is complete and usable"
+            )
+        if self._dropped_chunks_secondary:
+            logger.warning(
+                f"sys streaming dropped {self._dropped_chunks_secondary} chunks; "
+                f"wav backup at {audio_path} is complete and usable"
+            )
 
-        final_text = self.client.finish(timeout=60)
+        # Finalize both ASR sessions in parallel — they're independent and
+        # waiting for finals serially would double the worst-case latency.
+        secondary_final: Optional[str] = None
+        secondary_partials: list[Partial] = []
+        if self.secondary_client is not None:
+            sec_holder: dict = {}
+
+            def _finish_secondary() -> None:
+                sec_holder["final"] = self.secondary_client.finish(timeout=FINISH_TIMEOUT_S)
+
+            t = threading.Thread(target=_finish_secondary, daemon=True)
+            t.start()
+            final_text = self.client.finish(timeout=FINISH_TIMEOUT_S)
+            t.join(timeout=FINISH_TIMEOUT_S + 2)
+            secondary_final = sec_holder.get("final")
+            secondary_partials = list(self.secondary_client.partials)
+            self.secondary_client.close()
+        else:
+            final_text = self.client.finish(timeout=FINISH_TIMEOUT_S)
+
         partials = list(self.client.partials)
         duration_s = self.client.duration_s
         self.client.close()
 
         self.process = None
         self.client = None
+        self.secondary_client = None
         self._pump_thread = None
+        self._streamer_thread = None
+        self._streamer_thread_secondary = None
+        self._stream_queue = None
+        self._stream_queue_secondary = None
         self._wav = None
         self.current_file = None
 
@@ -398,6 +605,8 @@ class StreamingAudioRecorder:
             final_text=final_text,
             partials=partials,
             duration_s=duration_s,
+            secondary_final=secondary_final,
+            secondary_partials=secondary_partials,
         )
 
     def is_recording(self) -> bool:

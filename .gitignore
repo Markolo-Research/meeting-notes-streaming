@@ -11,6 +11,7 @@ ENV/
 # Meeting notes output
 notes/
 recordings/
+transcripts/
 /tmp/
 .status
 

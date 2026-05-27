@@ -5,6 +5,7 @@ in-process Unix-socket server that mimics the wire protocol (newline-
 delimited JSON with `ready`, `partial`, `final`, `closed` messages).
 """
 
+import array
 import io
 import json
 import socket
@@ -19,6 +20,7 @@ import pytest
 from meeting_notes.parakeet_stream import (
     ParakeetStreamClient,
     StreamingAudioRecorder,
+    _deinterleave_stereo_s16le,
 )
 
 
@@ -45,7 +47,23 @@ def test_capture_cmd_modes(tmp_path, monkeypatch):
     assert "default" in cmd and "fake-sink.monitor" in cmd
     assert "-filter_complex" in cmd
     filt = cmd[cmd.index("-filter_complex") + 1]
-    assert "amix=inputs=2" in filt
+    # Combined mode now emits stereo with mic on L, system on R so each
+    # channel can be transcribed independently. The filter uses join, not amix.
+    assert "join=inputs=2:channel_layout=stereo" in filt
+    # And the output is stereo s16le.
+    assert "-ac" in cmd and cmd[cmd.index("-ac") + 1] == "2"
+
+
+def test_deinterleave_stereo_s16le():
+    """L/R samples come out in the right channels."""
+    # Two frames: L=0x1234, R=0x5678; then L=0x0001, R=0xfffe (treated as signed below)
+    stereo = bytes([0x34, 0x12, 0x78, 0x56, 0x01, 0x00, 0xfe, 0xff])
+    left, right = _deinterleave_stereo_s16le(stereo)
+    assert left == bytes([0x34, 0x12, 0x01, 0x00])
+    assert right == bytes([0x78, 0x56, 0xfe, 0xff])
+    # An odd trailing partial frame is dropped, not raised.
+    left2, right2 = _deinterleave_stereo_s16le(stereo + b"\xaa")
+    assert (left2, right2) == (left, right)
 
 
 @pytest.fixture
@@ -164,3 +182,133 @@ def test_streaming_recorder_tees_to_wav_and_socket(fake_server, tmp_path):
         assert wf.readframes(wf.getnframes()) == pcm
     # Server received exactly the same bytes
     assert bytes(received) == pcm
+
+
+@pytest.fixture
+def dual_fake_server(tmp_path):
+    """Spin up a fake Parakeet server that accepts two concurrent sessions.
+
+    Each session gets its own thread and emits {ready, final, closed}.
+    Bytes are appended to per-session buffers as they arrive so tests can
+    observe them as soon as the recorder finishes — no need to wait for
+    the server threads to fully unwind.
+    """
+    socket_path = str(tmp_path / "fake_dual.sock")
+    sessions: list[bytearray] = [bytearray(), bytearray()]
+    session_done = [threading.Event(), threading.Event()]
+    next_idx = [0]
+    next_idx_lock = threading.Lock()
+    ready = threading.Event()
+
+    def session_loop(conn):
+        with next_idx_lock:
+            idx = next_idx[0]
+            next_idx[0] += 1
+        buf = sessions[idx]
+        try:
+            conn.sendall(
+                (json.dumps({"status": "ready", "sample_rate": 16000,
+                             "chunk_ms": 160, "latency_ms": 560}) + "\n").encode()
+            )
+            while True:
+                chunk = conn.recv(4096)
+                if not chunk:
+                    break
+                buf.extend(chunk)
+            conn.sendall(
+                (json.dumps({"final": f"session-{idx}-final", "duration_s": 0.5}) + "\n").encode()
+            )
+            conn.sendall(
+                (json.dumps({"status": "closed", "backup": "/tmp/x.wav"}) + "\n").encode()
+            )
+        finally:
+            conn.close()
+            session_done[idx].set()
+
+    def serve():
+        srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        srv.bind(socket_path)
+        srv.listen(4)
+        srv.settimeout(5)
+        ready.set()
+        try:
+            for _ in range(2):
+                conn, _ = srv.accept()
+                threading.Thread(target=session_loop, args=(conn,), daemon=True).start()
+        finally:
+            srv.close()
+
+    t = threading.Thread(target=serve, daemon=True)
+    t.start()
+    ready.wait(timeout=2)
+    yield socket_path, sessions[0], sessions[1], session_done
+    t.join(timeout=4)
+
+
+def test_combined_mode_splits_into_two_streams(dual_fake_server, tmp_path):
+    """Combined mode: ffmpeg emits stereo, recorder routes L→mic-session,
+    R→system-session, and writes a stereo wav backup."""
+    socket_path, mic_received, sys_received, session_done = dual_fake_server
+
+    # Build interleaved stereo PCM with clearly distinct L/R streams.
+    n_frames = 4000  # 0.25s @ 16 kHz
+    arr = array.array("h")
+    for i in range(n_frames):
+        arr.append(i % 1000 + 1)        # left / mic: positive
+        arr.append(-(i % 1000) - 1)     # right / sys: negative
+    stereo_pcm = arr.tobytes()  # 4 bytes/frame
+
+    class FakeProc:
+        def __init__(self, data: bytes):
+            self.stdout = io.BytesIO(data)
+            self._alive = True
+
+        def poll(self):
+            return None if self._alive else 0
+
+        def send_signal(self, sig):
+            self._alive = False
+
+        def wait(self, timeout=None):
+            return 0
+
+        def terminate(self):
+            self._alive = False
+
+        def kill(self):
+            self._alive = False
+
+    recorder = StreamingAudioRecorder(
+        output_dir=str(tmp_path / "rec_dual"),
+        socket_path=socket_path,
+        mode="combined",
+    )
+    # Skip the pactl probe — we don't actually use the sink name in this test.
+    recorder._default_sink_monitor = staticmethod(lambda: "fake.monitor")
+    with patch("meeting_notes.parakeet_stream.subprocess.Popen", return_value=FakeProc(stereo_pcm)):
+        recorder.start_recording("dual.wav")
+        time.sleep(0.4)
+        result = recorder.stop_recording()
+
+    # Wait for both server-side sessions to drain (recv'd all bytes + sent final).
+    assert session_done[0].wait(timeout=5)
+    assert session_done[1].wait(timeout=5)
+
+    # Both ASR sessions return a final. Order isn't guaranteed (which connection
+    # arrives first is a race), so we just check both are present.
+    finals = {result.final_text, result.secondary_final}
+    assert finals == {"session-0-final", "session-1-final"}
+
+    # Wav backup is stereo and contains the bytes we fed in.
+    with wave.open(result.audio_path, "rb") as wf:
+        assert wf.getnchannels() == 2
+        assert wf.getsampwidth() == 2
+        assert wf.getframerate() == 16000
+        assert wf.readframes(wf.getnframes()) == stereo_pcm
+
+    # The two sessions together received exactly the mono mic stream and the
+    # mono system stream that the deinterleaver would produce.
+    expected_left = array.array("h", arr[0::2]).tobytes()
+    expected_right = array.array("h", arr[1::2]).tobytes()
+    received = {bytes(mic_received), bytes(sys_received)}
+    assert received == {expected_left, expected_right}
