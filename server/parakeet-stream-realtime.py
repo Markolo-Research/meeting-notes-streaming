@@ -57,14 +57,25 @@ class Typer:
             return
         prefix = common_prefix_len(self.visible, target)
         backspaces = len(self.visible) - prefix
-        if backspaces > 0:
-            args = ["wtype", *self.delay_args]
-            for _ in range(backspaces):
-                args.extend(["-k", "BackSpace"])
-            subprocess.run(args, check=False)
         suffix = target[prefix:]
+        if backspaces == 0 and not suffix:
+            return
+        # Single wtype invocation: eliminates the inter-process gap that lets
+        # Electron drop the leading space of a new run.
+        # Spaces are emitted as -k space presses, not chars in a text arg —
+        # Electron's input pipeline reliably accepts the discrete key event
+        # but routinely drops space chars in a fast-typed string.
+        args = ["wtype", *self.delay_args]
+        for _ in range(backspaces):
+            args.extend(["-k", "BackSpace"])
         if suffix:
-            subprocess.run(["wtype", *self.delay_args, suffix], check=False)
+            chunks = suffix.split(" ")
+            for i, chunk in enumerate(chunks):
+                if i > 0:
+                    args.extend(["-k", "space"])
+                if chunk:
+                    args.append(chunk)
+        subprocess.run(args, check=False)
         self.visible = target
 
     def typed_chars(self) -> int:
