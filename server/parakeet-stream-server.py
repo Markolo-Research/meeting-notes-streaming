@@ -35,6 +35,11 @@ SOCKET_PATH = "/tmp/parakeet-stream.sock"
 MODEL_NAME = "nvidia/parakeet-unified-en-0.6b"
 SAMPLE_RATE = 16000
 IDLE_TIMEOUT_S = 600
+# Compute dtype for model + buffers. fp32 is the safe default. bf16 halves the
+# VRAM footprint (~4.5GB → ~2.5GB) and is robust for ASR inference on
+# Ampere+ GPUs; fp16 is also accepted but more prone to numerical issues on
+# TDT-style decoders.
+_DTYPE_NAME = os.environ.get("PARAKEET_DTYPE", "fp32").lower()
 
 CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))) / "parakeet-stream"
 BACKUP_KEEP = 20
@@ -55,6 +60,14 @@ def prune_backups() -> None:
         old.unlink(missing_ok=True)
 
 
+def _resolve_dtype():
+    import torch
+
+    return {"fp32": torch.float32, "bf16": torch.bfloat16, "fp16": torch.float16}.get(
+        _DTYPE_NAME, torch.float32
+    )
+
+
 def load_model():
     import torch
     from omegaconf import DictConfig, OmegaConf, open_dict
@@ -63,7 +76,8 @@ def load_model():
     from nemo.collections.asr.parts.submodules.rnnt_decoding import RNNTDecodingConfig
     from nemo.collections.asr.parts.utils.streaming_utils import ContextSize
 
-    log(f"Loading {MODEL_NAME} on {'cuda' if torch.cuda.is_available() else 'cpu'}...")
+    compute_dtype = _resolve_dtype()
+    log(f"Loading {MODEL_NAME} on {'cuda' if torch.cuda.is_available() else 'cpu'} (dtype={_DTYPE_NAME})...")
     model = ASRModel.from_pretrained(MODEL_NAME)
 
     with open_dict(model.cfg):
@@ -84,7 +98,7 @@ def load_model():
     model.change_decoding_strategy(decoding_cfg)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = model.to(device)
+    model = model.to(device=device, dtype=compute_dtype)
     model.freeze()
     model.eval()
     model.preprocessor.featurizer.dither = 0.0
@@ -153,8 +167,9 @@ def handle_session(
           "chunk_ms": int(ctx_samples.chunk / SAMPLE_RATE * 1000),
           "latency_ms": int((ctx_samples.chunk + ctx_samples.right) / SAMPLE_RATE * 1000)})
 
+    model_dtype = next(model.parameters()).dtype
     buffer = StreamingBatchedAudioBuffer(
-        batch_size=1, context_samples=ctx_samples, dtype=torch.float32, device=device
+        batch_size=1, context_samples=ctx_samples, dtype=model_dtype, device=device
     )
     state = None
     current_hyps = None
@@ -167,7 +182,7 @@ def handle_session(
 
     def decode_step(samples_np, is_last: bool) -> str:
         nonlocal state, current_hyps
-        audio_t = torch.from_numpy(samples_np).to(device=device, dtype=torch.float32).unsqueeze(0)
+        audio_t = torch.from_numpy(samples_np).to(device=device, dtype=model_dtype).unsqueeze(0)
         length_t = torch.tensor([audio_t.shape[1]], device=device, dtype=torch.long)
         buffer.add_audio_batch_(
             audio_t,
