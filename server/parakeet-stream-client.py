@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""Smoke-test client for parakeet-stream-server.
+"""Client for parakeet-stream-server.
 
 Reads a wav file (or raw s16le 16kHz mono PCM from stdin), streams it to the
 server, and prints partial / final transcripts as they arrive.
+
+With --final-only, suppresses everything except the concatenated final text
+on stdout — suitable for shell pipelines.
 """
 
 import argparse
@@ -36,6 +39,8 @@ def main() -> int:
                    help="Pace audio at real-time speed (simulate mic)")
     p.add_argument("--chunk-ms", type=int, default=160,
                    help="Audio chunk size sent per write (matches server chunk by default)")
+    p.add_argument("--final-only", action="store_true",
+                   help="Print only concatenated final text on stdout (pipeline mode)")
     args = p.parse_args()
 
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -43,6 +48,7 @@ def main() -> int:
     sock.settimeout(120)
 
     rx_buf = b""
+    finals: list[str] = []
 
     def drain_partial(blocking_final: bool = False) -> None:
         nonlocal rx_buf
@@ -60,11 +66,15 @@ def main() -> int:
                         continue
                     msg = json.loads(line)
                     if "partial" in msg:
-                        print(f"  ~ {msg['partial']}", flush=True)
+                        if not args.final_only:
+                            print(f"  ~ {msg['partial']}", flush=True)
                     elif "final" in msg:
-                        print(f"\nFINAL ({msg.get('duration_s', 0):.1f}s): {msg['final']}")
+                        finals.append(msg["final"])
+                        if not args.final_only:
+                            print(f"\nFINAL ({msg.get('duration_s', 0):.1f}s): {msg['final']}")
                     elif "status" in msg:
-                        print(f"[{msg['status']}] {json.dumps({k:v for k,v in msg.items() if k!='status'})}")
+                        if not args.final_only:
+                            print(f"[{msg['status']}] {json.dumps({k:v for k,v in msg.items() if k!='status'})}")
                     elif "error" in msg:
                         print(f"ERROR: {msg['error']}", file=sys.stderr)
         except socket.timeout:
@@ -77,6 +87,10 @@ def main() -> int:
     sock.shutdown(socket.SHUT_WR)
     drain_partial(blocking_final=True)
     sock.close()
+
+    if args.final_only:
+        text = " ".join(s.strip() for s in finals if s.strip())
+        sys.stdout.write(text)
     return 0
 
 
