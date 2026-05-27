@@ -41,15 +41,23 @@ def common_prefix_len(a: str, b: str) -> int:
 class Typer:
     """wtype frontend with diff-against-last-typed.
 
-    key_delay_ms sets wtype's inter-keystroke delay. Some apps (Electron,
-    Chromium, GTK4) drop events on fast bursts — spaces tend to be the
-    visible casualty. Default 5ms is reliable without being noticeable.
+    wtype has two delay knobs and they do different things:
+    - -d MS: delay between chars WITHIN a text arg.
+    - -s MS: pre-delay before the next OPERATION (-k, text, etc.).
+    Spaces between words are emitted as `-s INTER -k space -s INTER`
+    so picky apps (Electron/Chromium/GTK4) see a discrete event with
+    enough gap on either side to not coalesce it with neighbours.
     """
 
-    def __init__(self, enabled: bool, key_delay_ms: int):
+    def __init__(self, enabled: bool, key_delay_ms: int, inter_op_ms: int):
         self.enabled = enabled and shutil.which("wtype") is not None
         self.visible = ""
         self.delay_args = ["-d", str(key_delay_ms)] if key_delay_ms > 0 else []
+        self.inter_op = str(inter_op_ms) if inter_op_ms > 0 else None
+
+    def _gap(self, args: list[str]) -> None:
+        if self.inter_op is not None:
+            args.extend(["-s", self.inter_op])
 
     def set_target(self, target: str) -> None:
         if not self.enabled:
@@ -60,11 +68,6 @@ class Typer:
         suffix = target[prefix:]
         if backspaces == 0 and not suffix:
             return
-        # Single wtype invocation: eliminates the inter-process gap that lets
-        # Electron drop the leading space of a new run.
-        # Spaces are emitted as -k space presses, not chars in a text arg —
-        # Electron's input pipeline reliably accepts the discrete key event
-        # but routinely drops space chars in a fast-typed string.
         args = ["wtype", *self.delay_args]
         for _ in range(backspaces):
             args.extend(["-k", "BackSpace"])
@@ -72,7 +75,9 @@ class Typer:
             chunks = suffix.split(" ")
             for i, chunk in enumerate(chunks):
                 if i > 0:
+                    self._gap(args)
                     args.extend(["-k", "space"])
+                    self._gap(args)
                 if chunk:
                     args.append(chunk)
         subprocess.run(args, check=False)
@@ -130,7 +135,10 @@ def main() -> int:
     p.add_argument("--connect-timeout", type=float, default=45.0)
     p.add_argument("--key-delay-ms", type=int,
                    default=int(os.environ.get("PARAKEET_RT_KEY_DELAY_MS", "5")),
-                   help="wtype -d delay between keystrokes in ms (default 5)")
+                   help="wtype -d delay between chars within a text arg (default 5)")
+    p.add_argument("--inter-op-ms", type=int,
+                   default=int(os.environ.get("PARAKEET_RT_INTER_OP_MS", "20")),
+                   help="wtype -s gap around -k space presses (default 20)")
     args = p.parse_args()
 
     if not wait_for_socket(args.socket, args.connect_timeout):
@@ -145,7 +153,11 @@ def main() -> int:
     state_lock = threading.Lock()
     finals: list[str] = []
     current_partial = ""
-    typer = Typer(enabled=not args.no_live_type, key_delay_ms=args.key_delay_ms)
+    typer = Typer(
+        enabled=not args.no_live_type,
+        key_delay_ms=args.key_delay_ms,
+        inter_op_ms=args.inter_op_ms,
+    )
 
     def render_target() -> str:
         parts = finals + ([current_partial] if current_partial else [])
