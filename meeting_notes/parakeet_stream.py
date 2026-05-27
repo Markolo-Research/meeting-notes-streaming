@@ -214,24 +214,28 @@ def _socket_accepts(path: str) -> bool:
 
 
 class StreamingAudioRecorder:
-    """Mic-only recorder that tees PCM to a wav backup and the stream server.
+    """Tee-to-wav-and-socket recorder for the Parakeet streaming server.
 
-    Drop-in alternative to AudioRecorder, but operates at 16kHz mono so the
-    audio can be sent to the Parakeet streaming server without resampling.
-    Combined (mic + system) capture is not supported in streaming mode yet.
+    Uses a single ffmpeg subprocess to capture audio (mic, system, or both
+    mixed live) and emit s16le 16 kHz mono PCM on stdout. The pump thread
+    forwards every chunk to both a local wav backup and the streaming
+    server, so a server crash mid-meeting still leaves a recoverable wav.
     """
 
     def __init__(
         self,
         output_dir: str = "recordings",
         socket_path: str = DEFAULT_SOCKET,
+        mode: str = "mic",
         dev_mode: bool = False,
     ):
+        if mode not in ("mic", "system", "combined"):
+            raise ValueError(f"Invalid mode: {mode!r}")
         self.output_dir = Path(output_dir).expanduser()
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.socket_path = socket_path
         self.dev_mode = dev_mode
-        self.mode = "mic"  # streaming = mic-only for now
+        self.mode = mode
 
         self.current_file: Optional[Path] = None
         self.process: Optional[subprocess.Popen] = None
@@ -273,22 +277,65 @@ class StreamingAudioRecorder:
         return str(self.current_file)
 
     def _build_capture_cmd(self) -> list[str]:
-        if shutil.which("pw-record"):
+        """Single ffmpeg invocation that captures + mixes + downsamples to
+        s16le 16 kHz mono on stdout. Mode controls which inputs are wired."""
+        if not shutil.which("ffmpeg"):
+            raise RuntimeError("ffmpeg not found on PATH")
+
+        common_out = [
+            "-ar", str(SAMPLE_RATE),
+            "-ac", "1",
+            "-f", "s16le",
+            "-loglevel", "warning",
+            "pipe:1",
+        ]
+
+        if self.mode == "mic":
             return [
-                "pw-record",
-                "--channels=1",
-                "--format=s16",
-                f"--rate={SAMPLE_RATE}",
-                "-",
+                "ffmpeg", "-hide_banner", "-nostdin",
+                "-f", "pulse", "-i", "default",
+                *common_out,
             ]
-        if shutil.which("parec"):
+
+        monitor = self._default_sink_monitor()
+        if self.mode == "system":
             return [
-                "parec",
-                "--channels=1",
-                "--format=s16le",
-                f"--rate={SAMPLE_RATE}",
+                "ffmpeg", "-hide_banner", "-nostdin",
+                "-f", "pulse", "-i", monitor,
+                *common_out,
             ]
-        raise RuntimeError("Neither pw-record nor parec found on PATH")
+
+        # combined: mix mic + system live with the same filter graph the
+        # whisper-mode post-mix uses (volume=2.0 each, amix, no normalize).
+        return [
+            "ffmpeg", "-hide_banner", "-nostdin",
+            "-f", "pulse", "-i", "default",
+            "-f", "pulse", "-i", monitor,
+            "-filter_complex",
+            "[0:a]volume=2.0[a0];[1:a]volume=2.0[a1];"
+            "[a0][a1]amix=inputs=2:duration=longest:normalize=0[out]",
+            "-map", "[out]",
+            *common_out,
+        ]
+
+    @staticmethod
+    def _default_sink_monitor() -> str:
+        """Return the monitor source name for the default PulseAudio sink.
+
+        Falls back to '@DEFAULT_MONITOR@' which PulseAudio resolves at
+        connect time if pactl isn't available for some reason.
+        """
+        try:
+            result = subprocess.run(
+                ["pactl", "get-default-sink"],
+                capture_output=True, text=True, timeout=2,
+            )
+            sink = result.stdout.strip()
+            if result.returncode == 0 and sink:
+                return f"{sink}.monitor"
+        except (OSError, subprocess.SubprocessError) as exc:
+            logger.warning(f"pactl get-default-sink failed: {exc}")
+        return "@DEFAULT_MONITOR@"
 
     def _pump(self) -> None:
         assert self.process is not None and self._wav is not None and self.client is not None
@@ -360,16 +407,21 @@ class StreamingAudioRecorder:
         return str(self.current_file) if self.current_file else None
 
     def get_audio_device_info(self) -> dict[str, str]:
-        info: dict[str, str] = {"mode": "mic", "backend": "parakeet-stream"}
+        info: dict[str, str] = {"mode": self.mode, "backend": "parakeet-stream"}
         try:
-            result = subprocess.run(
-                ["pactl", "get-default-source"],
-                capture_output=True,
-                text=True,
-                timeout=2,
-            )
-            if result.returncode == 0:
-                info["mic_device"] = result.stdout.strip() or "System default"
+            if self.mode in ("mic", "combined"):
+                result = subprocess.run(
+                    ["pactl", "get-default-source"],
+                    capture_output=True, text=True, timeout=2,
+                )
+                info["mic_device"] = (
+                    result.stdout.strip() if result.returncode == 0 else "System default"
+                ) or "System default"
+            if self.mode in ("system", "combined"):
+                info["system_device"] = self._default_sink_monitor()
         except (OSError, subprocess.SubprocessError):
-            info["mic_device"] = "System default"
+            if "mic_device" not in info and self.mode in ("mic", "combined"):
+                info["mic_device"] = "System default"
+            if "system_device" not in info and self.mode in ("system", "combined"):
+                info["system_device"] = "@DEFAULT_MONITOR@"
         return info

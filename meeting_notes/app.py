@@ -765,6 +765,7 @@ class MeetingNotesApp(App):
             recorder = StreamingAudioRecorder(
                 output_dir=self.config.recordings_dir,
                 socket_path=self.config.parakeet_socket,
+                mode=self.config.recording_mode,
                 dev_mode=self.dev_mode,
             )
             recorder.set_on_partial(self._on_stream_partial)

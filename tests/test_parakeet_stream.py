@@ -22,6 +22,32 @@ from meeting_notes.parakeet_stream import (
 )
 
 
+def test_capture_cmd_modes(tmp_path, monkeypatch):
+    """Each mode yields a single ffmpeg invocation with the right inputs."""
+    monkeypatch.setattr(
+        "meeting_notes.parakeet_stream.StreamingAudioRecorder._default_sink_monitor",
+        staticmethod(lambda: "fake-sink.monitor"),
+    )
+
+    rec_mic = StreamingAudioRecorder(output_dir=str(tmp_path), mode="mic")
+    cmd = rec_mic._build_capture_cmd()
+    assert cmd[0] == "ffmpeg"
+    assert "default" in cmd and "fake-sink.monitor" not in cmd
+    assert "-filter_complex" not in cmd
+
+    rec_sys = StreamingAudioRecorder(output_dir=str(tmp_path), mode="system")
+    cmd = rec_sys._build_capture_cmd()
+    assert "fake-sink.monitor" in cmd and "default" not in cmd[:cmd.index("fake-sink.monitor")]
+    assert "-filter_complex" not in cmd
+
+    rec_comb = StreamingAudioRecorder(output_dir=str(tmp_path), mode="combined")
+    cmd = rec_comb._build_capture_cmd()
+    assert "default" in cmd and "fake-sink.monitor" in cmd
+    assert "-filter_complex" in cmd
+    filt = cmd[cmd.index("-filter_complex") + 1]
+    assert "amix=inputs=2" in filt
+
+
 @pytest.fixture
 def fake_server(tmp_path):
     """Spin up a fake Parakeet server on a temp Unix socket.
