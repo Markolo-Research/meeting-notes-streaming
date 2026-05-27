@@ -3,8 +3,9 @@
 
 Spawns pw-record for mic capture, streams PCM to the streaming server,
 reads partial/final events, and live-injects text as it arrives using
-one of three backends: ydotool (uinput-level, default when available),
-wl-copy paste, or wtype synthetic keys.
+ydotool (uinput-level, preferred) or wtype (Wayland virtual keyboard,
+fallback). ydotool is required for Electron — wtype's synthetic events
+get filtered there, dropping spaces unpredictably.
 
 On SIGINT/SIGTERM: stops capture, half-closes the socket so the server
 flushes a final pass, injects any remaining diff, and writes the full
@@ -54,24 +55,16 @@ def _ydotool_socket_ready() -> bool:
 def _resolve_injector(requested: str) -> str:
     """Pick a concrete injector mode given the user's preference.
 
-    Modes: ydotool > paste > wtype. 'auto' (default) picks the first
-    that's actually available. Explicit modes fall back if their tools
-    are missing rather than dying silently mid-session.
+    Modes: ydotool > wtype. 'auto' (default) prefers ydotool when its
+    socket is reachable, else falls back to wtype. Explicit modes fall
+    back too rather than dying silently mid-session.
     """
     have_ydotool = shutil.which("ydotool") is not None and _ydotool_socket_ready()
-    have_paste = (
-        shutil.which("wl-copy") is not None and shutil.which("wl-paste") is not None
-    )
     have_wtype = shutil.which("wtype") is not None
     candidates = {
-        "auto": [
-            ("ydotool", have_ydotool),
-            ("paste", have_paste),
-            ("wtype", have_wtype),
-        ],
-        "ydotool": [("ydotool", have_ydotool), ("paste", have_paste), ("wtype", have_wtype)],
-        "paste": [("paste", have_paste), ("wtype", have_wtype)],
-        "wtype": [("wtype", have_wtype), ("paste", have_paste)],
+        "auto": [("ydotool", have_ydotool), ("wtype", have_wtype)],
+        "ydotool": [("ydotool", have_ydotool), ("wtype", have_wtype)],
+        "wtype": [("wtype", have_wtype), ("ydotool", have_ydotool)],
     }
     for name, ok in candidates.get(requested, candidates["auto"]):
         if ok:
@@ -82,34 +75,20 @@ def _resolve_injector(requested: str) -> str:
 class Typer:
     """Diff-against-last-typed text injector.
 
-    Injector backends, in preference order:
+    Backends:
     - ydotool: uinput-level events (looks like a real USB keyboard).
       Bypasses Wayland app filtering — works in Electron, password
       fields, everything. Requires ydotoold running and /dev/uinput
       access (user in 'input' group).
-    - paste: wl-copy + Ctrl+V. Atomic at the receiver, but clobbers
-      clipboard mid-session and triggers per-app paste handlers.
-    - wtype: virtual_keyboard protocol. Fastest but Electron drops
-      synthetic events (spaces specifically) regardless of delays.
+    - wtype: virtual_keyboard protocol. Fallback when ydotool isn't
+      available. Electron silently drops synthetic events (spaces
+      especially), so prefer ydotool there.
     """
 
-    def __init__(
-        self,
-        enabled: bool,
-        key_delay_ms: int,
-        inter_op_ms: int,
-        injector: str,
-    ):
+    def __init__(self, enabled: bool, injector: str):
         self.mode = _resolve_injector(injector) if enabled else "none"
         self.enabled = self.mode != "none"
         self.visible = ""
-        self.delay_args = ["-d", str(key_delay_ms)] if key_delay_ms > 0 else []
-        self.inter_op = str(inter_op_ms) if inter_op_ms > 0 else None
-        self._saved_clipboard: bytes | None = None
-
-    def _gap(self, args: list[str]) -> None:
-        if self.inter_op is not None:
-            args.extend(["-s", self.inter_op])
 
     def set_target(self, target: str) -> None:
         if not self.enabled:
@@ -122,8 +101,6 @@ class Typer:
             return
         if self.mode == "ydotool":
             self._apply_ydotool(backspaces, suffix)
-        elif self.mode == "paste":
-            self._apply_paste(backspaces, suffix)
         else:
             self._apply_wtype(backspaces, suffix)
         self.visible = target
@@ -142,58 +119,13 @@ class Typer:
             )
 
     def _apply_wtype(self, backspaces: int, suffix: str) -> None:
-        args = ["wtype", *self.delay_args]
-        for _ in range(backspaces):
-            args.extend(["-k", "BackSpace"])
-        if suffix:
-            chunks = suffix.split(" ")
-            for i, chunk in enumerate(chunks):
-                if i > 0:
-                    self._gap(args)
-                    args.extend(["-k", "space"])
-                    self._gap(args)
-                if chunk:
-                    args.append(chunk)
-        subprocess.run(args, check=False)
-
-    def _apply_paste(self, backspaces: int, suffix: str) -> None:
-        if self._saved_clipboard is None:
-            self._saved_clipboard = self._snapshot_clipboard()
         if backspaces > 0:
             args = ["wtype"]
             for _ in range(backspaces):
                 args.extend(["-k", "BackSpace"])
             subprocess.run(args, check=False)
         if suffix:
-            subprocess.run(["wl-copy"], input=suffix.encode(), check=False)
-            # wl-copy daemonises; give the compositor a moment to take
-            # ownership before we trigger paste, or Ctrl+V grabs stale data.
-            time.sleep(0.03)
-            subprocess.run(
-                ["wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl"], check=False
-            )
-
-    @staticmethod
-    def _snapshot_clipboard() -> bytes:
-        try:
-            r = subprocess.run(
-                ["wl-paste", "--no-newline"],
-                capture_output=True,
-                timeout=1.0,
-            )
-            return r.stdout
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            return b""
-
-    def restore_clipboard(self) -> None:
-        if self._saved_clipboard is None or not shutil.which("wl-copy"):
-            return
-        if self._saved_clipboard:
-            subprocess.run(
-                ["wl-copy"], input=self._saved_clipboard, check=False
-            )
-        else:
-            subprocess.run(["wl-copy", "--clear"], check=False)
+            subprocess.run(["wtype", "--", suffix], check=False)
 
     def typed_chars(self) -> int:
         return len(self.visible)
@@ -245,18 +177,12 @@ def main() -> int:
     p.add_argument("--copy", action="store_true",
                    help="On exit, copy final transcript to clipboard via wl-copy")
     p.add_argument("--connect-timeout", type=float, default=45.0)
-    p.add_argument("--key-delay-ms", type=int,
-                   default=int(os.environ.get("PARAKEET_RT_KEY_DELAY_MS", "5")),
-                   help="wtype -d delay between chars within a text arg (default 5)")
-    p.add_argument("--inter-op-ms", type=int,
-                   default=int(os.environ.get("PARAKEET_RT_INTER_OP_MS", "20")),
-                   help="wtype -s gap around -k space presses (default 20)")
     p.add_argument("--injector",
                    default=os.environ.get("PARAKEET_RT_INJECTOR", "auto"),
-                   choices=["auto", "ydotool", "paste", "wtype"],
+                   choices=["auto", "ydotool", "wtype"],
                    help="Text injection backend. 'auto' (default) prefers "
-                        "ydotool, then paste, then wtype. Each non-auto choice "
-                        "falls back to the next available if its tool is missing.")
+                        "ydotool, falling back to wtype if ydotoold isn't "
+                        "reachable.")
     args = p.parse_args()
 
     if not wait_for_socket(args.socket, args.connect_timeout):
@@ -271,12 +197,7 @@ def main() -> int:
     state_lock = threading.Lock()
     finals: list[str] = []
     current_partial = ""
-    typer = Typer(
-        enabled=not args.no_live_type,
-        key_delay_ms=args.key_delay_ms,
-        inter_op_ms=args.inter_op_ms,
-        injector=args.injector,
-    )
+    typer = Typer(enabled=not args.no_live_type, injector=args.injector)
     print(f"injector={typer.mode}", file=sys.stderr, flush=True)
 
     def render_target() -> str:
@@ -369,10 +290,6 @@ def main() -> int:
     transcript = " ".join(finals).strip()
     if args.save_transcript:
         Path(args.save_transcript).write_text(transcript)
-    # In paste mode we clobbered the clipboard with intermediate suffixes;
-    # restore the user's original. --copy below overwrites it again with
-    # the final transcript when requested.
-    typer.restore_clipboard()
     if args.copy and transcript and shutil.which("wl-copy"):
         subprocess.run(["wl-copy"], input=transcript.encode(), check=False)
     return 0
