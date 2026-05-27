@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Realtime mic→socket→wtype client for parakeet-stream-server.
+"""Realtime mic→socket→keyboard client for parakeet-stream-server.
 
 Spawns pw-record for mic capture, streams PCM to the streaming server,
-reads partial/final events, and live-types text via wtype as it arrives.
+reads partial/final events, and live-injects text as it arrives using
+one of three backends: ydotool (uinput-level, default when available),
+wl-copy paste, or wtype synthetic keys.
+
 On SIGINT/SIGTERM: stops capture, half-closes the socket so the server
-flushes a final pass, types any remaining diff, and writes the full
+flushes a final pass, injects any remaining diff, and writes the full
 transcript to --save-transcript before exiting.
 
 Used by shout(1) for SHOUT_ENGINE=parakeet-realtime.
@@ -38,15 +41,56 @@ def common_prefix_len(a: str, b: str) -> int:
     return i
 
 
+YDOTOOL_BACKSPACE = "14"  # Linux input code KEY_BACKSPACE
+
+
+def _ydotool_socket_ready() -> bool:
+    sock = os.environ.get(
+        "YDOTOOL_SOCKET", f"/run/user/{os.getuid()}/.ydotool_socket"
+    )
+    return Path(sock).is_socket()
+
+
+def _resolve_injector(requested: str) -> str:
+    """Pick a concrete injector mode given the user's preference.
+
+    Modes: ydotool > paste > wtype. 'auto' (default) picks the first
+    that's actually available. Explicit modes fall back if their tools
+    are missing rather than dying silently mid-session.
+    """
+    have_ydotool = shutil.which("ydotool") is not None and _ydotool_socket_ready()
+    have_paste = (
+        shutil.which("wl-copy") is not None and shutil.which("wl-paste") is not None
+    )
+    have_wtype = shutil.which("wtype") is not None
+    candidates = {
+        "auto": [
+            ("ydotool", have_ydotool),
+            ("paste", have_paste),
+            ("wtype", have_wtype),
+        ],
+        "ydotool": [("ydotool", have_ydotool), ("paste", have_paste), ("wtype", have_wtype)],
+        "paste": [("paste", have_paste), ("wtype", have_wtype)],
+        "wtype": [("wtype", have_wtype), ("paste", have_paste)],
+    }
+    for name, ok in candidates.get(requested, candidates["auto"]):
+        if ok:
+            return name
+    return "none"
+
+
 class Typer:
     """Diff-against-last-typed text injector.
 
-    Two modes:
-    - paste (default when wl-copy/wl-paste available): backspace via wtype,
-      then wl-copy + Ctrl+V to inject the new suffix atomically. Reliable
-      in Electron/Chromium/GTK4 where synthetic key events get dropped.
-    - wtype-text: emit the suffix as wtype key events with -s gaps around
-      every -k space. Faster, no clipboard clobber, but lossy in picky apps.
+    Injector backends, in preference order:
+    - ydotool: uinput-level events (looks like a real USB keyboard).
+      Bypasses Wayland app filtering — works in Electron, password
+      fields, everything. Requires ydotoold running and /dev/uinput
+      access (user in 'input' group).
+    - paste: wl-copy + Ctrl+V. Atomic at the receiver, but clobbers
+      clipboard mid-session and triggers per-app paste handlers.
+    - wtype: virtual_keyboard protocol. Fastest but Electron drops
+      synthetic events (spaces specifically) regardless of delays.
     """
 
     def __init__(
@@ -54,17 +98,13 @@ class Typer:
         enabled: bool,
         key_delay_ms: int,
         inter_op_ms: int,
-        paste_mode: bool,
+        injector: str,
     ):
-        self.enabled = enabled and shutil.which("wtype") is not None
+        self.mode = _resolve_injector(injector) if enabled else "none"
+        self.enabled = self.mode != "none"
         self.visible = ""
         self.delay_args = ["-d", str(key_delay_ms)] if key_delay_ms > 0 else []
         self.inter_op = str(inter_op_ms) if inter_op_ms > 0 else None
-        self.paste_mode = (
-            paste_mode
-            and shutil.which("wl-copy") is not None
-            and shutil.which("wl-paste") is not None
-        )
         self._saved_clipboard: bytes | None = None
 
     def _gap(self, args: list[str]) -> None:
@@ -80,11 +120,26 @@ class Typer:
         suffix = target[prefix:]
         if backspaces == 0 and not suffix:
             return
-        if self.paste_mode:
+        if self.mode == "ydotool":
+            self._apply_ydotool(backspaces, suffix)
+        elif self.mode == "paste":
             self._apply_paste(backspaces, suffix)
         else:
             self._apply_wtype(backspaces, suffix)
         self.visible = target
+
+    def _apply_ydotool(self, backspaces: int, suffix: str) -> None:
+        if backspaces > 0:
+            key_args: list[str] = []
+            for _ in range(backspaces):
+                key_args.extend([f"{YDOTOOL_BACKSPACE}:1", f"{YDOTOOL_BACKSPACE}:0"])
+            subprocess.run(["ydotool", "key", *key_args], check=False)
+        if suffix:
+            # --escape=0: treat input literally (no shell-style escape
+            # interpretation), important for verbatim transcript text.
+            subprocess.run(
+                ["ydotool", "type", "--escape=0", "--", suffix], check=False
+            )
 
     def _apply_wtype(self, backspaces: int, suffix: str) -> None:
         args = ["wtype", *self.delay_args]
@@ -196,10 +251,12 @@ def main() -> int:
     p.add_argument("--inter-op-ms", type=int,
                    default=int(os.environ.get("PARAKEET_RT_INTER_OP_MS", "20")),
                    help="wtype -s gap around -k space presses (default 20)")
-    p.add_argument("--no-paste", action="store_true",
-                   default=os.environ.get("PARAKEET_RT_PASTE", "1") == "0",
-                   help="Don't use clipboard paste; emit text via wtype keys. "
-                        "Default is clipboard paste when wl-copy is available.")
+    p.add_argument("--injector",
+                   default=os.environ.get("PARAKEET_RT_INJECTOR", "auto"),
+                   choices=["auto", "ydotool", "paste", "wtype"],
+                   help="Text injection backend. 'auto' (default) prefers "
+                        "ydotool, then paste, then wtype. Each non-auto choice "
+                        "falls back to the next available if its tool is missing.")
     args = p.parse_args()
 
     if not wait_for_socket(args.socket, args.connect_timeout):
@@ -218,8 +275,9 @@ def main() -> int:
         enabled=not args.no_live_type,
         key_delay_ms=args.key_delay_ms,
         inter_op_ms=args.inter_op_ms,
-        paste_mode=not args.no_paste,
+        injector=args.injector,
     )
+    print(f"injector={typer.mode}", file=sys.stderr, flush=True)
 
     def render_target() -> str:
         parts = finals + ([current_partial] if current_partial else [])
