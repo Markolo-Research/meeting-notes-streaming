@@ -35,11 +35,12 @@ SOCKET_PATH = "/tmp/parakeet-stream.sock"
 MODEL_NAME = "nvidia/parakeet-unified-en-0.6b"
 SAMPLE_RATE = 16000
 IDLE_TIMEOUT_S = 600
-# Compute dtype for model + buffers. fp32 is the safe default. bf16 halves the
-# VRAM footprint (~4.5GB → ~2.5GB) and is robust for ASR inference on
-# Ampere+ GPUs; fp16 is also accepted but more prone to numerical issues on
-# TDT-style decoders.
-_DTYPE_NAME = os.environ.get("PARAKEET_DTYPE", "fp32").lower()
+# Compute dtype for model + buffers. bf16 is the default — cuts ~1.2 GiB of
+# allocated VRAM vs fp32 with identical transcription on test audio (NeMo's
+# preprocessor casts back to fp32 internally for mel filterbanks). Override
+# with PARAKEET_DTYPE=fp32 if you hit numerical issues. fp16 also accepted
+# but more prone to softmax issues on TDT-style decoders.
+_DTYPE_NAME = os.environ.get("PARAKEET_DTYPE", "bf16").lower()
 
 CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))) / "parakeet-stream"
 BACKUP_KEEP = 20
