@@ -17,8 +17,10 @@ from unittest.mock import patch
 
 import pytest
 
+from meeting_notes.app import _tokens_with_times
 from meeting_notes.parakeet_stream import (
     ParakeetStreamClient,
+    Partial,
     StreamingAudioRecorder,
     _deinterleave_stereo_s16le,
 )
@@ -64,6 +66,61 @@ def test_deinterleave_stereo_s16le():
     # An odd trailing partial frame is dropped, not raised.
     left2, right2 = _deinterleave_stereo_s16le(stereo + b"\xaa")
     assert (left2, right2) == (left, right)
+
+
+def test_tokens_with_times_handles_long_growing_partial_timeline():
+    """Long meetings emit many cumulative partials; timestamping must stay linear."""
+    tokens = [f"word{i}" for i in range(2500)]
+    partials = [
+        Partial(elapsed_s=float(i), text=" ".join(tokens[: i + 1]))
+        for i in range(len(tokens))
+    ]
+
+    mapped_tokens, times = _tokens_with_times(partials, " ".join(tokens))
+
+    assert mapped_tokens == tokens
+    assert times[:3] == [0.0, 1.0, 2.0]
+    assert times[-1] == float(len(tokens) - 1)
+
+
+def test_tokens_with_times_tolerates_partial_whitespace_differences():
+    partials = [
+        Partial(elapsed_s=1.0, text=" hello"),
+        Partial(elapsed_s=2.0, text=" hello  world"),
+        Partial(elapsed_s=3.0, text=" hello  world again"),
+    ]
+
+    mapped_tokens, times = _tokens_with_times(partials, "hello world again")
+
+    assert mapped_tokens == ["hello", "world", "again"]
+    assert times == [1.0, 2.0, 3.0]
+
+
+def test_tokens_with_times_handles_revised_partial_prefix():
+    partials = [
+        Partial(elapsed_s=1.0, text="hello word"),
+        Partial(elapsed_s=2.0, text="hello world"),
+        Partial(elapsed_s=3.0, text="hello world again"),
+    ]
+
+    mapped_tokens, times = _tokens_with_times(partials, "hello world again")
+
+    assert mapped_tokens == ["hello", "world", "again"]
+    assert times == [1.0, 2.0, 3.0]
+
+
+def test_tokens_with_times_recovers_after_non_prefix_correction():
+    partials = [
+        Partial(elapsed_s=1.0, text="hello"),
+        Partial(elapsed_s=2.0, text="noise"),
+        Partial(elapsed_s=3.0, text="hello world"),
+        Partial(elapsed_s=4.0, text="hello world again"),
+    ]
+
+    mapped_tokens, times = _tokens_with_times(partials, "hello world again")
+
+    assert mapped_tokens == ["hello", "world", "again"]
+    assert times == [1.0, 3.0, 4.0]
 
 
 @pytest.fixture

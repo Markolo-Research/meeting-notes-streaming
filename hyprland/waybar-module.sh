@@ -1,34 +1,50 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Meeting Notes - Waybar Module
 # Displays current meeting recording status in Waybar
+set -euo pipefail
 
 # Auto-detect meeting-notes directory (parent of hyprland/ folder where this script lives)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MEETING_NOTES_DIR="$(dirname "$SCRIPT_DIR")"
 STATUS_FILE="$MEETING_NOTES_DIR/.status"
-
-# Check if meeting-notes app is running
-if ! pgrep -f "python.*run.py" > /dev/null; then
-    echo '{"text": "󰗠", "tooltip": "Meeting Notes (not running)", "class": "idle"}'
-    exit 0
+APP_PATTERN="meeting_notes\\.app|python.*run\\.py|uv run.*run\\.py"
+APP_RUNNING=0
+if pgrep -f "$APP_PATTERN" > /dev/null; then
+    APP_RUNNING=1
 fi
 
 # Read status file
 if [ -f "$STATUS_FILE" ]; then
+    # shellcheck disable=SC1090
     source "$STATUS_FILE"
     
-    case "$STATUS" in
+    case "${STATUS:-idle}" in
         "recording")
-            echo "{\"text\": \"󰦕 ${DURATION:-00:00}\", \"tooltip\": \"Recording: ${TITLE:-Meeting}\", \"class\": \"recording\"}"
+            if [ "$APP_RUNNING" -eq 1 ]; then
+                echo "{\"text\": \"󰦕 ${DURATION:-00:00}\", \"tooltip\": \"Recording: ${TITLE:-Meeting}\", \"class\": \"recording\"}"
+            else
+                echo '{"text": "󰗠", "tooltip": "Meeting Notes (not running)", "class": "idle"}'
+            fi
             ;;
         "processing")
-            echo "{\"text\": \"󰄬\", \"tooltip\": \"Processing recording...\", \"class\": \"processing\"}"
+            if [ "$APP_RUNNING" -eq 1 ]; then
+                echo "{\"text\": \"󰄬\", \"tooltip\": \"Processing recording...\", \"class\": \"processing\"}"
+            else
+                echo '{"text": "󰗠", "tooltip": "Meeting Notes (not running)", "class": "idle"}'
+            fi
             ;;
         *)
-            echo "{\"text\": \"󰗠\", \"tooltip\": \"Meeting Notes (ready)\", \"class\": \"ready\"}"
+            if [ "$APP_RUNNING" -eq 1 ]; then
+                echo "{\"text\": \"󰗠\", \"tooltip\": \"Meeting Notes (ready)\", \"class\": \"ready\"}"
+            else
+                echo '{"text": "󰗠", "tooltip": "Meeting Notes (not running)", "class": "idle"}'
+            fi
             ;;
     esac
 else
-    # App is running but no status file yet
-    echo '{"text": "󰗠", "tooltip": "Meeting Notes (ready)", "class": "ready"}'
+    if [ "$APP_RUNNING" -eq 1 ]; then
+        echo '{"text": "󰗠", "tooltip": "Meeting Notes (ready)", "class": "ready"}'
+    else
+        echo '{"text": "󰗠", "tooltip": "Meeting Notes (not running)", "class": "idle"}'
+    fi
 fi

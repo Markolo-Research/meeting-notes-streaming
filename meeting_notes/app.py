@@ -5,6 +5,8 @@ import sys
 import time
 import subprocess
 import os
+import re
+import shlex
 import multiprocessing.resource_tracker
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -20,6 +22,7 @@ from textual import work
 from rich.markup import escape as _rich_escape
 
 _LIVE_TRANSCRIPT_TAIL_CHARS = 320  # shown per channel in the live preview
+_TOKEN_RE = re.compile(r"\S+")
 
 from meeting_notes.recorder import AudioRecorder
 from meeting_notes.transcriber import WhisperTranscriber
@@ -46,20 +49,43 @@ def _tokens_with_times(partials: list[Partial], final_text: str) -> tuple[list[s
     Tokens that never appeared (e.g. punctuation added at finalize) inherit
     the time of the last partial.
     """
-    tokens = final_text.split()
-    if not tokens:
+    token_matches = list(_TOKEN_RE.finditer(final_text))
+    if not token_matches:
         return [], []
+    tokens = [match.group(0) for match in token_matches]
     cleaned = [p for p in partials if p.text]
     if not cleaned:
         return tokens, [0.0] * len(tokens)
     fallback_t = cleaned[-1].elapsed_s
     times: list[float] = [fallback_t] * len(tokens)
-    for idx in range(len(tokens)):
-        prefix = tokens[: idx + 1]
-        for p in cleaned:
-            if p.text.split()[: idx + 1] == prefix:
-                times[idx] = p.elapsed_s
-                break
+    assigned_tokens = 0
+    partial_pos = 0
+    previous_text = ""
+    for p in cleaned:
+        if p.text.startswith(previous_text):
+            for match in _TOKEN_RE.finditer(p.text, partial_pos):
+                if assigned_tokens >= len(tokens):
+                    break
+                if match.group(0) != tokens[assigned_tokens]:
+                    break
+                times[assigned_tokens] = p.elapsed_s
+                assigned_tokens += 1
+                partial_pos = match.end()
+        else:
+            matched_tokens = 0
+            matched_end = 0
+            for match in _TOKEN_RE.finditer(p.text):
+                if matched_tokens >= len(tokens) or match.group(0) != tokens[matched_tokens]:
+                    break
+                if matched_tokens >= assigned_tokens:
+                    times[matched_tokens] = p.elapsed_s
+                matched_tokens += 1
+                matched_end = match.end()
+            assigned_tokens = max(assigned_tokens, matched_tokens)
+            partial_pos = matched_end
+        if assigned_tokens == len(tokens):
+            break
+        previous_text = p.text
     return tokens, times
 
 
@@ -1100,11 +1126,11 @@ class MeetingNotesApp(App):
         try:
             status_file = Path(__file__).parent.parent / ".status"
             with open(status_file, 'w') as f:
-                f.write(f'STATUS="{status}"\n')
+                f.write(f"STATUS={shlex.quote(status)}\n")
                 if title:
-                    f.write(f'TITLE="{title}"\n')
+                    f.write(f"TITLE={shlex.quote(title)}\n")
                 if duration:
-                    f.write(f'DURATION="{duration}"\n')
+                    f.write(f"DURATION={shlex.quote(duration)}\n")
         except Exception as e:
             logger.warning(f"Failed to write status file: {e}")
     
