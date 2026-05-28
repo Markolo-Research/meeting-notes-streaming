@@ -10,6 +10,12 @@ half-closes write side to signal end. Server emits newline-delimited JSON:
 
 Audio is also written to a backup wav at $XDG_CACHE_HOME/parakeet-stream/<ts>.wav
 so a server crash mid-meeting still leaves a recoverable recording.
+
+Env vars:
+  PARAKEET_DTYPE              fp32 | bf16 (default) | fp16
+  PARAKEET_SILENCE_RMS        Onset/silence threshold on float32 audio (default 0.01)
+  PARAKEET_SILENCE_RESET_MS   Silence span before next-speech triggers a
+                              decoder-state reset (default 1500)
 """
 
 import argparse
@@ -50,6 +56,15 @@ CHUNK_SECS = 0.16
 LEFT_CONTEXT_SECS = 5.6
 RIGHT_CONTEXT_SECS = 0.40
 
+# After this much continuous silence, the left-context buffer is mostly silent
+# and the model's first chunk on speech resumption tends to under-transcribe
+# the onset (clipped leading word/two). Reset the decoder + audio buffer on
+# the first speech chunk after the threshold so new utterances get a clean
+# decode. current_hyps is preserved so the diff-typer client keeps the same
+# cumulative target (no full re-type / backspace storm).
+SILENCE_RMS_THRESHOLD = float(os.environ.get("PARAKEET_SILENCE_RMS", "0.01"))
+SILENCE_RESET_MS = int(os.environ.get("PARAKEET_SILENCE_RESET_MS", "1500"))
+
 
 def log(msg: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
@@ -61,12 +76,41 @@ def prune_backups() -> None:
         old.unlink(missing_ok=True)
 
 
+def chunk_rms(samples_np) -> float:
+    """RMS of a float32 audio chunk in [-1, 1]. Cheap silence/onset signal."""
+    import numpy as np
+
+    if samples_np.size == 0:
+        return 0.0
+    return float(np.sqrt(np.mean(samples_np.astype(np.float32, copy=False) ** 2)))
+
+
+class SilenceResetGate:
+    """Decides when speech onset after sustained silence should reset the
+    streaming decoder. Caller drives by peeking each next 160 ms chunk."""
+
+    def __init__(self, rms_threshold: float, silence_chunks_needed: int):
+        self.rms_threshold = rms_threshold
+        self.silence_chunks_needed = silence_chunks_needed
+        self.silence_chunks = 0
+
+    def should_reset(self, rms: float, *, eligible: bool) -> bool:
+        """True iff caller should reset state before decoding this chunk.
+        `eligible=False` short-circuits when state is already fresh."""
+        return eligible and rms >= self.rms_threshold and self.silence_chunks >= self.silence_chunks_needed
+
+    def commit(self, rms: float) -> None:
+        """Record the chunk after consumption."""
+        if rms >= self.rms_threshold:
+            self.silence_chunks = 0
+        else:
+            self.silence_chunks += 1
+
+
 def _resolve_dtype():
     import torch
 
-    return {"fp32": torch.float32, "bf16": torch.bfloat16, "fp16": torch.float16}.get(
-        _DTYPE_NAME, torch.float32
-    )
+    return {"fp32": torch.float32, "bf16": torch.bfloat16, "fp16": torch.float16}.get(_DTYPE_NAME, torch.float32)
 
 
 def load_model():
@@ -123,14 +167,12 @@ def load_model():
     )
 
     if model.cfg.encoder.att_context_style == "chunked_limited_with_rc":
-        model.encoder.set_default_att_context_size(
-            att_context_size=[ctx_enc.left, ctx_enc.chunk, ctx_enc.right]
-        )
+        model.encoder.set_default_att_context_size(att_context_size=[ctx_enc.left, ctx_enc.chunk, ctx_enc.right])
 
     log(
-        f"Ready. Chunk={ctx_samples.chunk/SAMPLE_RATE*1000:.0f}ms "
-        f"Right={ctx_samples.right/SAMPLE_RATE*1000:.0f}ms "
-        f"Latency={int((ctx_samples.chunk+ctx_samples.right)/SAMPLE_RATE*1000)}ms"
+        f"Ready. Chunk={ctx_samples.chunk / SAMPLE_RATE * 1000:.0f}ms "
+        f"Right={ctx_samples.right / SAMPLE_RATE * 1000:.0f}ms "
+        f"Latency={int((ctx_samples.chunk + ctx_samples.right) / SAMPLE_RATE * 1000)}ms"
     )
     return model, ctx_samples, ctx_enc, encoder_frame_samples
 
@@ -164,14 +206,17 @@ def handle_session(
         with send_lock:
             conn.sendall((json.dumps(payload) + "\n").encode())
 
-    send({"status": "ready", "sample_rate": SAMPLE_RATE,
-          "chunk_ms": int(ctx_samples.chunk / SAMPLE_RATE * 1000),
-          "latency_ms": int((ctx_samples.chunk + ctx_samples.right) / SAMPLE_RATE * 1000)})
+    send(
+        {
+            "status": "ready",
+            "sample_rate": SAMPLE_RATE,
+            "chunk_ms": int(ctx_samples.chunk / SAMPLE_RATE * 1000),
+            "latency_ms": int((ctx_samples.chunk + ctx_samples.right) / SAMPLE_RATE * 1000),
+        }
+    )
 
     model_dtype = next(model.parameters()).dtype
-    buffer = StreamingBatchedAudioBuffer(
-        batch_size=1, context_samples=ctx_samples, dtype=model_dtype, device=device
-    )
+    buffer = StreamingBatchedAudioBuffer(batch_size=1, context_samples=ctx_samples, dtype=model_dtype, device=device)
     state = None
     current_hyps = None
     pending = bytearray()
@@ -180,6 +225,9 @@ def handle_session(
     chunk_samples = ctx_samples.chunk
     right_samples = ctx_samples.right
     first_window_samples = chunk_samples + right_samples
+    chunk_ms = chunk_samples / SAMPLE_RATE * 1000
+    silence_reset_chunks = max(1, int(SILENCE_RESET_MS / chunk_ms))
+    gate = SilenceResetGate(SILENCE_RMS_THRESHOLD, silence_reset_chunks)
 
     def decode_step(samples_np, is_last: bool) -> str:
         nonlocal state, current_hyps
@@ -194,12 +242,13 @@ def handle_session(
         # The model + decoding_computer are shared across sessions; lock for
         # the duration of the GPU work. Per-session buffer/state stays local.
         with model_lock:
-            encoder_out, encoder_len = model(input_signal=buffer.samples,
-                                              input_signal_length=buffer.context_size_batch.total())
+            encoder_out, encoder_len = model(
+                input_signal=buffer.samples, input_signal_length=buffer.context_size_batch.total()
+            )
             encoder_out = encoder_out.transpose(1, 2)
             enc_ctx = buffer.context_size.subsample(factor=encoder_frame_samples)
             enc_ctx_batch = buffer.context_size_batch.subsample(factor=encoder_frame_samples)
-            encoder_out = encoder_out[:, enc_ctx.left:]
+            encoder_out = encoder_out[:, enc_ctx.left :]
             out_len = encoder_len - enc_ctx_batch.left if is_last else enc_ctx_batch.chunk
             chunk_hyps, _, state = decoding_computer(
                 x=encoder_out, out_len=out_len, prev_batched_state=state, multi_biasing_ids=None
@@ -223,25 +272,52 @@ def handle_session(
                 pending.extend(data)
                 backup.writeframesraw(data)
 
-                # First decode needs chunk+right samples; subsequent need chunk samples
-                needed = first_window_samples if decoded_samples == 0 else chunk_samples
-                needed_bytes = needed * 2
+                # Peek the leading 160 ms of pending for VAD on every iteration.
+                # This is the same audio we're about to feed in (possibly bundled
+                # into a 560 ms first-window decode after a reset), so the
+                # reset decision aligns with the chunk that actually triggers it.
+                while len(pending) >= chunk_samples * 2:
+                    peek_np = (
+                        np.frombuffer(bytes(pending[: chunk_samples * 2]), dtype=np.int16).astype(np.float32) / 32768.0
+                    )
+                    rms = chunk_rms(peek_np)
 
-                while len(pending) >= needed_bytes:
-                    samples_np = (np.frombuffer(bytes(pending[:needed_bytes]), dtype=np.int16)
-                                  .astype(np.float32) / 32768.0)
+                    if gate.should_reset(rms, eligible=decoded_samples > 0):
+                        state = None
+                        buffer = StreamingBatchedAudioBuffer(
+                            batch_size=1,
+                            context_samples=ctx_samples,
+                            dtype=model_dtype,
+                            device=device,
+                        )
+                        decoded_samples = 0
+                        log(f"silence_reset after {gate.silence_chunks * chunk_ms / 1000:.1f}s (rms={rms:.4f})")
+
+                    needed = first_window_samples if decoded_samples == 0 else chunk_samples
+                    needed_bytes = needed * 2
+                    if len(pending) < needed_bytes:
+                        # Just reset and need more bytes for first-window decode.
+                        # Don't commit the silence counter — re-peek this chunk next pass.
+                        break
+
+                    samples_np = (
+                        np.frombuffer(bytes(pending[:needed_bytes]), dtype=np.int16).astype(np.float32) / 32768.0
+                    )
                     del pending[:needed_bytes]
                     partial = decode_step(samples_np, is_last=False)
                     decoded_samples += needed
-                    needed = chunk_samples
-                    needed_bytes = needed * 2
+                    gate.commit(rms)
                     send({"partial": partial})
 
             # Client done sending: flush remaining samples as last chunk
             if pending or decoded_samples == 0:
                 import numpy as np
-                tail = (np.frombuffer(bytes(pending), dtype=np.int16).astype(np.float32) / 32768.0
-                        if pending else np.zeros(1, dtype=np.float32))
+
+                tail = (
+                    np.frombuffer(bytes(pending), dtype=np.int16).astype(np.float32) / 32768.0
+                    if pending
+                    else np.zeros(1, dtype=np.float32)
+                )
                 final = decode_step(tail, is_last=True)
             else:
                 # Nothing left; finalize with empty last marker
@@ -249,7 +325,7 @@ def handle_session(
                 final = model.tokenizer.ids_to_text(final.y_sequence.tolist())
 
             send({"final": final, "duration_s": total_received_samples / SAMPLE_RATE})
-            log(f"Session done. {total_received_samples/SAMPLE_RATE:.1f}s audio → {len(final)} chars")
+            log(f"Session done. {total_received_samples / SAMPLE_RATE:.1f}s audio → {len(final)} chars")
     finally:
         backup.close()
         try:
