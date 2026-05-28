@@ -123,6 +123,20 @@ def test_tokens_with_times_recovers_after_non_prefix_correction():
     assert times == [1.0, 3.0, 4.0]
 
 
+def test_tokens_with_times_recovers_after_shorter_partial_correction():
+    partials = [
+        Partial(elapsed_s=3.0, text="a b c"),
+        Partial(elapsed_s=4.0, text="a b"),
+        Partial(elapsed_s=5.0, text="a b c d"),
+        Partial(elapsed_s=6.0, text="a b c d e"),
+    ]
+
+    mapped_tokens, times = _tokens_with_times(partials, "a b c d e")
+
+    assert mapped_tokens == ["a", "b", "c", "d", "e"]
+    assert times == [3.0, 3.0, 3.0, 5.0, 6.0]
+
+
 @pytest.fixture
 def fake_server(tmp_path):
     """Spin up a fake Parakeet server on a temp Unix socket.

@@ -62,7 +62,8 @@ def _tokens_with_times(partials: list[Partial], final_text: str) -> tuple[list[s
     partial_pos = 0
     previous_text = ""
     for p in cleaned:
-        if p.text.startswith(previous_text):
+        next_previous_text = p.text
+        if previous_text and p.text.startswith(previous_text):
             for match in _TOKEN_RE.finditer(p.text, partial_pos):
                 if assigned_tokens >= len(tokens):
                     break
@@ -81,11 +82,13 @@ def _tokens_with_times(partials: list[Partial], final_text: str) -> tuple[list[s
                     times[matched_tokens] = p.elapsed_s
                 matched_tokens += 1
                 matched_end = match.end()
+            if matched_tokens < assigned_tokens:
+                next_previous_text = ""
             assigned_tokens = max(assigned_tokens, matched_tokens)
             partial_pos = matched_end
         if assigned_tokens == len(tokens):
             break
-        previous_text = p.text
+        previous_text = next_previous_text
     return tokens, times
 
 
