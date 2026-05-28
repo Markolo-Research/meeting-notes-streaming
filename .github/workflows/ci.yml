@@ -14,7 +14,7 @@ concurrency:
 jobs:
   test:
     name: lint + tests (Python 3.12)
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.MARKOLO_CI_RUNNER_LABELS || '["self-hosted","Linux","X64","markolo-hetzner","ci-light"]') }}
 
     steps:
       - uses: actions/checkout@v4
