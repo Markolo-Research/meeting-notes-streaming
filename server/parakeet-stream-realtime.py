@@ -46,9 +46,7 @@ YDOTOOL_BACKSPACE = "14"  # Linux input code KEY_BACKSPACE
 
 
 def _ydotool_socket_ready() -> bool:
-    sock = os.environ.get(
-        "YDOTOOL_SOCKET", f"/run/user/{os.getuid()}/.ydotool_socket"
-    )
+    sock = os.environ.get("YDOTOOL_SOCKET", f"/run/user/{os.getuid()}/.ydotool_socket")
     return Path(sock).is_socket()
 
 
@@ -129,9 +127,7 @@ class Typer:
         if suffix:
             # --escape=0: treat input literally (no shell-style escape
             # interpretation), important for verbatim transcript text.
-            subprocess.run(
-                ["ydotool", "type", "--escape=0", "--", suffix], check=False
-            )
+            subprocess.run(["ydotool", "type", "--escape=0", "--", suffix], check=False)
 
     def _apply_wtype(self, backspaces: int, suffix: str) -> None:
         # Single wtype invocation: per commit 0a9425f, the inter-process gap
@@ -163,11 +159,39 @@ def wait_for_socket(path: str, timeout: float) -> bool:
     return False
 
 
+def play_ready_beep() -> None:
+    """Fire-and-forget audible cue that the session is ready to receive audio.
+    Tries common Linux audio players in order; silently no-ops if none work.
+    """
+    candidates: list[list[str]] = []
+    if shutil.which("canberra-gtk-play"):
+        candidates.append(["canberra-gtk-play", "-i", "message"])
+    for player in ("paplay", "pw-play"):
+        if shutil.which(player):
+            for path in (
+                "/usr/share/sounds/freedesktop/stereo/message.oga",
+                "/usr/share/sounds/freedesktop/stereo/bell.oga",
+            ):
+                if Path(path).is_file():
+                    candidates.append([player, path])
+                    break
+    for cmd in candidates:
+        try:
+            subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+            )
+            return
+        except (FileNotFoundError, OSError):
+            continue
+
+
 def open_audio_source(record_path: str | None) -> tuple[subprocess.Popen, "wave.Wave_write | None"]:
     """Spawn pw-record reading 16kHz mono s16 to stdout; optionally tee to wav."""
     proc = subprocess.Popen(
-        ["pw-record", "--rate", str(SAMPLE_RATE), "--channels", "1",
-         "--format", "s16", "-"],
+        ["pw-record", "--rate", str(SAMPLE_RATE), "--channels", "1", "--format", "s16", "-"],
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         stdin=subprocess.DEVNULL,
@@ -185,21 +209,25 @@ def open_audio_source(record_path: str | None) -> tuple[subprocess.Popen, "wave.
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--socket", default=DEFAULT_SOCKET)
-    p.add_argument("--save-transcript",
-                   help="On exit, write the concatenated final transcript here")
-    p.add_argument("--record-path",
-                   help="Tee captured audio to this wav (recovery backup)")
-    p.add_argument("--no-live-type", action="store_true",
-                   help="Disable live typing (ydotool/wtype); collect only")
-    p.add_argument("--copy", action="store_true",
-                   help="On exit, copy final transcript to clipboard via wl-copy")
+    p.add_argument("--save-transcript", help="On exit, write the concatenated final transcript here")
+    p.add_argument("--record-path", help="Tee captured audio to this wav (recovery backup)")
+    p.add_argument("--no-live-type", action="store_true", help="Disable live typing (ydotool/wtype); collect only")
+    p.add_argument("--copy", action="store_true", help="On exit, copy final transcript to clipboard via wl-copy")
     p.add_argument("--connect-timeout", type=float, default=45.0)
-    p.add_argument("--injector",
-                   default=os.environ.get("PARAKEET_RT_INJECTOR", "auto"),
-                   choices=["auto", "ydotool", "wtype"],
-                   help="Text injection backend. 'auto' (default) prefers "
-                        "ydotool, falling back to wtype if ydotoold isn't "
-                        "reachable.")
+    p.add_argument(
+        "--ready-beep",
+        action="store_true",
+        help="Play a subtle beep once the server's ready message "
+        "arrives — the moment audio is actually being received.",
+    )
+    p.add_argument(
+        "--injector",
+        default=os.environ.get("PARAKEET_RT_INJECTOR", "auto"),
+        choices=["auto", "ydotool", "wtype"],
+        help="Text injection backend. 'auto' (default) prefers "
+        "ydotool, falling back to wtype if ydotoold isn't "
+        "reachable.",
+    )
     args = p.parse_args()
 
     if not wait_for_socket(args.socket, args.connect_timeout):
@@ -215,11 +243,7 @@ def main() -> int:
     finals: list[str] = []
     current_partial = ""
     typer = Typer(enabled=not args.no_live_type, injector=args.injector)
-    if (
-        args.injector != "auto"
-        and typer.enabled
-        and typer.mode != args.injector
-    ):
+    if args.injector != "auto" and typer.enabled and typer.mode != args.injector:
         # Either the requested backend is unavailable, or the env-var default
         # is a value argparse choices= didn't validate (e.g. legacy 'paste').
         print(
@@ -273,8 +297,11 @@ def main() -> int:
                             finals.append(text)
                         current_partial = ""
                         typer.set_target(render_target())
-                    elif "status" in msg and msg.get("status") == "closed":
-                        return
+                    elif "status" in msg:
+                        if msg.get("status") == "ready" and args.ready_beep:
+                            play_ready_beep()
+                        elif msg.get("status") == "closed":
+                            return
 
     rx_thread = threading.Thread(target=receiver, daemon=True)
     rx_thread.start()
