@@ -18,6 +18,7 @@ import argparse
 import errno
 import json
 import os
+import queue
 import shutil
 import signal
 import socket
@@ -144,9 +145,11 @@ class Typer:
         return len(self.visible)
 
 
-def wait_for_socket(path: str, timeout: float) -> bool:
+def wait_for_socket(path: str, timeout: float, stop: "threading.Event | None" = None) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:
+        if stop is not None and stop.is_set():
+            return False
         if Path(path).is_socket():
             try:
                 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -230,15 +233,79 @@ def main() -> int:
     )
     args = p.parse_args()
 
-    if not wait_for_socket(args.socket, args.connect_timeout):
-        print(f"timed out waiting for {args.socket}", file=sys.stderr)
+    stop = threading.Event()
+
+    def handle_signal(_signum, _frame):
+        stop.set()
+
+    signal.signal(signal.SIGINT, handle_signal)
+    signal.signal(signal.SIGTERM, handle_signal)
+
+    # Start mic capture immediately — BEFORE waiting for the server. On a cold
+    # start the server spends ~30s loading its model before it even binds the
+    # socket; if we opened pw-record only after connecting, every word spoken
+    # during that load would be lost (and the leading word or two clipped).
+    # Instead we capture from t=0, tee to the backup wav, and buffer raw PCM in
+    # a queue, then flush the backlog ahead of the live stream once connected.
+    pw, wav = open_audio_source(args.record_path)
+    audio_q: "queue.Queue[bytes | None]" = queue.Queue()
+
+    def capture():
+        assert pw.stdout is not None
+        try:
+            while not stop.is_set():
+                data = pw.stdout.read(CHUNK_BYTES)
+                if not data:
+                    break
+                if wav is not None:
+                    wav.writeframes(data)
+                audio_q.put(data)
+        finally:
+            audio_q.put(None)  # sentinel: capture finished
+
+    cap_thread = threading.Thread(target=capture, daemon=True)
+    cap_thread.start()
+
+    def shutdown_capture() -> None:
+        # Idempotent: terminate capture, join the thread, then close the wav
+        # (joining first guarantees the writer has surrendered the handle).
+        nonlocal wav
+        stop.set()
+        pw.terminate()
+        try:
+            pw.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            pw.kill()
+        cap_thread.join(timeout=2)
+        if wav is not None:
+            wav.close()
+            wav = None
+
+    # Wait for the server socket (model load). Capture keeps buffering meanwhile;
+    # abort cleanly if the user hits stop before the server is ready.
+    if not wait_for_socket(args.socket, args.connect_timeout, stop):
+        timed_out = not stop.is_set()
+        shutdown_capture()
+        if timed_out:
+            print(f"timed out waiting for {args.socket}", file=sys.stderr)
         return 2
 
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sock.connect(args.socket)
-    sock.settimeout(1.0)
+    try:
+        sock.connect(args.socket)
+    except OSError as e:
+        # Socket vanished between wait_for_socket's probe and now (server
+        # crash/restart). Tear down capture so pw-record isn't orphaned.
+        shutdown_capture()
+        print(f"connect failed: {e}", file=sys.stderr)
+        return 2
+    # Blocking socket (no timeout). Flushing the warm-up backlog is a burst that
+    # can outrun the server and fill the send buffer; a send timeout here would
+    # raise on the burst and drop most of the audio. Blocking sendall instead
+    # applies backpressure. The receiver runs in its own thread and returns on
+    # the server's "closed" message, so it never needs a recv timeout either.
+    sock.setblocking(True)
 
-    stop = threading.Event()
     state_lock = threading.Lock()
     finals: list[str] = []
     current_partial = ""
@@ -256,12 +323,6 @@ def main() -> int:
     def render_target() -> str:
         parts = finals + ([current_partial] if current_partial else [])
         return " ".join(s for s in parts if s).strip()
-
-    def handle_signal(_signum, _frame):
-        stop.set()
-
-    signal.signal(signal.SIGINT, handle_signal)
-    signal.signal(signal.SIGTERM, handle_signal)
 
     def receiver():
         nonlocal current_partial
@@ -306,16 +367,18 @@ def main() -> int:
     rx_thread = threading.Thread(target=receiver, daemon=True)
     rx_thread.start()
 
-    pw, wav = open_audio_source(args.record_path)
-
     try:
-        assert pw.stdout is not None
-        while not stop.is_set():
-            data = pw.stdout.read(CHUNK_BYTES)
-            if not data:
+        # Drain the capture queue: buffered backlog from the warm-up window
+        # first, then live audio, until capture ends (sentinel) or we stop.
+        while True:
+            try:
+                data = audio_q.get(timeout=0.5)
+            except queue.Empty:
+                if stop.is_set():
+                    break
+                continue
+            if data is None:  # capture thread finished
                 break
-            if wav is not None:
-                wav.writeframes(data)
             try:
                 sock.sendall(data)
             except (BrokenPipeError, OSError) as e:
@@ -324,13 +387,7 @@ def main() -> int:
                 break
     finally:
         # Stop capture first so no more audio queues up
-        pw.terminate()
-        try:
-            pw.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            pw.kill()
-        if wav is not None:
-            wav.close()
+        shutdown_capture()
         # Half-close write side; server flushes pending finals
         try:
             sock.shutdown(socket.SHUT_WR)
