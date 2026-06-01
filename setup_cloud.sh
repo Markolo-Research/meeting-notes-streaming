@@ -146,11 +146,19 @@ openrouter_api_key: $([ "$PROVIDER" = "openrouter" ] && echo "\"$API_KEY\"" || e
 ollama_model: llama3.2:3b
 
 # Transcription
+transcription_backend: whisper
+parakeet_socket: /tmp/parakeet-stream.sock
+parakeet_autostart: true
+parakeet_cpp_cli: parakeet-cli
+parakeet_cpp_model: ~/.local/share/parakeet.cpp/models/tdt_ctc-110m-q8_0.gguf
+parakeet_cpp_threads: 8
+parakeet_cpp_args: ""
 whisper_model: base
 
 # Storage
 notes_dir: ~/Documents/meeting-notes/notes
 recordings_dir: recordings
+transcripts_dir: transcripts
 
 # Editor
 editor: nvim

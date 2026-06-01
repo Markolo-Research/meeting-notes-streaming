@@ -24,6 +24,26 @@ def test_recording_retention_roundtrips_through_dict():
     assert cfg2.recording_retention_days == 7
 
 
+def test_parakeet_cpp_config_roundtrips_through_dict():
+    cfg = AppConfig.from_dict({
+        "transcription_backend": "parakeet-cpp",
+        "parakeet_cpp_cli": "/tmp/parakeet-cli",
+        "parakeet_cpp_model": "/tmp/model.gguf",
+        "parakeet_cpp_threads": 4,
+        "parakeet_cpp_args": "--decoder ctc",
+    })
+
+    assert cfg.transcription_backend == "parakeet-cpp"
+    assert cfg.parakeet_cpp_cli == "/tmp/parakeet-cli"
+    assert cfg.parakeet_cpp_model == "/tmp/model.gguf"
+    assert cfg.parakeet_cpp_threads == 4
+    assert cfg.parakeet_cpp_args == "--decoder ctc"
+
+    cfg2 = AppConfig.from_dict(cfg.to_dict())
+    assert cfg2.transcription_backend == "parakeet-cpp"
+    assert cfg2.parakeet_cpp_threads == 4
+
+
 def test_terminal_file_browser_defaults_to_empty():
     """The terminal_file_browser field (mathstuf #8) defaults to empty string."""
     cfg = AppConfig()
@@ -71,6 +91,12 @@ def test_validate_accepts_valid_anthropic_config():
 def test_validate_none_provider_is_always_valid():
     """ai_provider='none' should validate without any keys."""
     cfg = AppConfig(ai_provider="none")
+    ok, err = validate_config(cfg)
+    assert ok, err
+
+
+def test_validate_accepts_parakeet_cpp_backend():
+    cfg = AppConfig(ai_provider="none", transcription_backend="parakeet-cpp")
     ok, err = validate_config(cfg)
     assert ok, err
 

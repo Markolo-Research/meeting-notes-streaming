@@ -25,7 +25,7 @@ _LIVE_TRANSCRIPT_TAIL_CHARS = 320  # shown per channel in the live preview
 _TOKEN_RE = re.compile(r"\S+")
 
 from meeting_notes.recorder import AudioRecorder
-from meeting_notes.transcriber import WhisperTranscriber
+from meeting_notes.transcriber import ParakeetCppTranscriber, WhisperTranscriber
 from meeting_notes.note_maker import NoteMaker
 from meeting_notes.config import load_config, save_config, AppConfig, validate_config
 from meeting_notes.settings import SettingsScreen
@@ -782,7 +782,7 @@ class MeetingNotesApp(App):
         
         # Initialize components with config values
         self.recorder = None  # AudioRecorder or StreamingAudioRecorder, set in on_mount
-        self.transcriber = WhisperTranscriber(self.config.whisper_model)
+        self.transcriber = self._build_transcriber()
         self._parakeet_server_proc = None
         self._last_stream_result: Optional[StreamResult] = None
         
@@ -811,6 +811,17 @@ class MeetingNotesApp(App):
 
         # Clean up old recordings on startup
         self._cleanup_old_recordings()
+
+    def _build_transcriber(self):
+        """Construct the batch transcription backend."""
+        if self.config.transcription_backend == "parakeet-cpp":
+            return ParakeetCppTranscriber(
+                cli=self.config.parakeet_cpp_cli,
+                model_path=self.config.parakeet_cpp_model,
+                threads=self.config.parakeet_cpp_threads,
+                extra_args=self.config.parakeet_cpp_args,
+            )
+        return WhisperTranscriber(self.config.whisper_model)
 
     def _build_recorder(self):
         """Construct the recorder backend based on transcription_backend config."""
@@ -1370,13 +1381,20 @@ class MeetingNotesApp(App):
                     severity="information",
                 )
             else:
-                # Fall back to Whisper (or this run never used streaming)
-                logger.info("Loading Whisper model")
-                self.call_from_thread(self.notify, f"Loading Whisper {self.config.whisper_model} model...", severity="information")
+                # Batch transcription path: Whisper by default, parakeet.cpp when configured.
+                backend = self.config.transcription_backend
+                if backend == "parakeet-cpp":
+                    load_msg = "Checking parakeet.cpp model..."
+                    transcribe_msg = "Transcribing audio with parakeet.cpp..."
+                else:
+                    load_msg = f"Loading Whisper {self.config.whisper_model} model..."
+                    transcribe_msg = "Transcribing audio (this may take a few minutes)..."
+                logger.info(f"Loading transcription backend: {backend}")
+                self.call_from_thread(self.notify, load_msg, severity="information")
                 self.transcriber.load_model()
 
                 logger.info("Starting transcription")
-                self.call_from_thread(self.notify, "Transcribing audio (this may take a few minutes)...", severity="information")
+                self.call_from_thread(self.notify, transcribe_msg, severity="information")
                 result = self.transcriber.transcribe(audio_path)
 
                 text = result.text
@@ -1871,7 +1889,7 @@ class MeetingNotesApp(App):
             self.config = new_config
             
             # Reinitialize components with new config
-            self.transcriber = WhisperTranscriber(self.config.whisper_model)
+            self.transcriber = self._build_transcriber()
             
             # Get appropriate API key based on provider (check config first, then env vars)
             api_key = None

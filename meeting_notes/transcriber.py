@@ -1,5 +1,9 @@
-"""Transcription module using OpenAI Whisper."""
+"""Transcription backends for recorded meeting audio."""
 
+import json
+import shlex
+import shutil
+import subprocess
 import whisper
 from pathlib import Path
 from typing import Optional, Callable
@@ -133,6 +137,112 @@ class WhisperTranscriber:
             return f"{hours:02d}:{minutes:02d}:{secs:02d}"
         else:
             return f"{minutes:02d}:{secs:02d}"
+
+
+class ParakeetCppTranscriber:
+    """Transcribe audio files using mudler/parakeet.cpp's GGUF CLI."""
+
+    def __init__(
+        self,
+        cli: str = "parakeet-cli",
+        model_path: str = "~/.local/share/parakeet.cpp/models/tdt_ctc-110m-q8_0.gguf",
+        threads: int = 8,
+        extra_args: str = "",
+    ):
+        logger.info(f"Initializing ParakeetCppTranscriber (model: {model_path})")
+        self.cli = cli
+        self.model_path = str(Path(model_path).expanduser())
+        self.threads = threads
+        self.extra_args = extra_args
+
+    def load_model(self):
+        """Validate CLI/model availability. parakeet.cpp loads per transcription."""
+        if shutil.which(self.cli) is None:
+            raise FileNotFoundError(f"{self.cli} not found on PATH")
+        if not Path(self.model_path).is_file():
+            raise FileNotFoundError(f"parakeet.cpp model not found: {self.model_path}")
+
+    def transcribe(
+        self,
+        audio_path: str,
+        progress_callback: Optional[Callable[[float], None]] = None,
+    ) -> TranscriptResult:
+        del progress_callback
+        self.load_model()
+        audio_file = Path(audio_path)
+        if not audio_file.exists():
+            logger.error(f"Audio file not found: {audio_file}")
+            raise FileNotFoundError(f"Audio file not found: {audio_file}")
+
+        cmd = [
+            self.cli,
+            "transcribe",
+            "--model",
+            self.model_path,
+            "--input",
+            str(audio_file),
+            "--json",
+        ]
+        if self.threads > 0:
+            cmd.extend(["--threads", str(self.threads)])
+        if self.extra_args:
+            cmd.extend(shlex.split(self.extra_args))
+
+        file_size_mb = audio_file.stat().st_size / (1024 * 1024)
+        logger.info(
+            f"Transcribing {audio_file.name} ({file_size_mb:.1f} MB) with parakeet.cpp..."
+        )
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        if proc.returncode != 0:
+            stderr = proc.stderr.strip() or proc.stdout.strip()
+            raise RuntimeError(f"parakeet.cpp transcription failed: {stderr}")
+
+        try:
+            payload = json.loads(proc.stdout)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"parakeet.cpp returned invalid JSON: {proc.stdout[:200]!r}") from exc
+
+        text = str(payload.get("text", "")).strip()
+        words = payload.get("words") or []
+        segments = self._segments_from_words(words, text)
+        duration = segments[-1].end if segments else 0.0
+        logger.info(
+            f"parakeet.cpp transcription complete: {len(segments)} segments, {duration:.1f}s duration"
+        )
+        return TranscriptResult(
+            text=text,
+            segments=segments,
+            language="unknown",
+            duration=duration,
+        )
+
+    @staticmethod
+    def _segments_from_words(words: list[dict], fallback_text: str) -> list[TranscriptSegment]:
+        """Group word timestamps into readable transcript chunks."""
+        if not words:
+            return [TranscriptSegment(start=0.0, end=0.0, text=fallback_text)] if fallback_text else []
+
+        segments: list[TranscriptSegment] = []
+        current: list[str] = []
+        start = float(words[0].get("start", 0.0) or 0.0)
+        end = start
+
+        for word in words:
+            token = str(word.get("w", "")).strip()
+            if not token:
+                continue
+            word_start = float(word.get("start", end) or end)
+            word_end = float(word.get("end", word_start) or word_start)
+            if current and (word_start - start >= 15.0 or current[-1].endswith((".", "?", "!"))):
+                segments.append(TranscriptSegment(start=start, end=end, text=" ".join(current)))
+                current = []
+                start = word_start
+            current.append(token)
+            end = word_end
+
+        if current:
+            segments.append(TranscriptSegment(start=start, end=end, text=" ".join(current)))
+        return segments
 
 
 if __name__ == "__main__":

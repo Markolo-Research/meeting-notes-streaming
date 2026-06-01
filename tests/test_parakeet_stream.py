@@ -24,6 +24,7 @@ from meeting_notes.parakeet_stream import (
     StreamingAudioRecorder,
     _deinterleave_stereo_s16le,
 )
+from meeting_notes.transcriber import ParakeetCppTranscriber
 
 
 def test_capture_cmd_modes(tmp_path, monkeypatch):
@@ -66,6 +67,51 @@ def test_deinterleave_stereo_s16le():
     # An odd trailing partial frame is dropped, not raised.
     left2, right2 = _deinterleave_stereo_s16le(stereo + b"\xaa")
     assert (left2, right2) == (left, right)
+
+
+def test_parakeet_cpp_transcriber_parses_cli_json(tmp_path):
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"RIFF")
+
+    completed = subprocess_result(
+        stdout=json.dumps({
+            "text": "hello world",
+            "words": [
+                {"w": "hello", "start": 0.0, "end": 0.4, "conf": 0.9},
+                {"w": "world", "start": 0.5, "end": 0.9, "conf": 0.8},
+            ],
+        }),
+        returncode=0,
+    )
+
+    with (
+        patch("meeting_notes.transcriber.shutil.which", return_value="/bin/parakeet-cli"),
+        patch("meeting_notes.transcriber.Path.is_file", return_value=True),
+        patch("meeting_notes.transcriber.subprocess.run", return_value=completed) as run,
+    ):
+        result = ParakeetCppTranscriber(
+            cli="parakeet-cli",
+            model_path="/models/test.gguf",
+            threads=4,
+            extra_args="--decoder ctc",
+        ).transcribe(str(audio))
+
+    assert result.text == "hello world"
+    assert [(s.start, s.end, s.text) for s in result.segments] == [(0.0, 0.9, "hello world")]
+    assert "--json" in run.call_args.args[0]
+    assert "--threads" in run.call_args.args[0]
+    assert "--decoder" in run.call_args.args[0]
+
+
+def subprocess_result(stdout: str, returncode: int):
+    class Result:
+        stderr = ""
+
+        def __init__(self):
+            self.stdout = stdout
+            self.returncode = returncode
+
+    return Result()
 
 
 def test_tokens_with_times_handles_long_growing_partial_timeline():

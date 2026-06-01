@@ -333,6 +333,11 @@ bind = SUPER, M, exec, $HOME/.local/bin/meeting-notes
 - `mic` - Microphone only
 - `system` - System audio only
 
+**Transcription backends** (`~/.config/meeting-notes/config.yaml`):
+- `whisper` - batch Whisper transcription
+- `parakeet` - streaming Python/NeMo Parakeet server
+- `parakeet-cpp` - batch `parakeet-cli` GGUF transcription
+
 ## Roadmap
 
 ### Planned Features
