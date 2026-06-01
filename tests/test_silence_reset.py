@@ -20,6 +20,8 @@ import pytest
 def _load_server_module():
     path = Path(__file__).resolve().parent.parent / "server" / "parakeet-stream-server.py"
     spec = importlib.util.spec_from_file_location("parakeet_stream_server", path)
+    assert spec is not None
+    assert spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod

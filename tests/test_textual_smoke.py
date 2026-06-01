@@ -15,6 +15,7 @@ run locally:
     pip install -e ".[all,dev]"
     pytest tests/test_textual_smoke.py
 """
+
 import pytest
 
 # Skip the entire module if the heavy deps (whisper / textual) aren't
@@ -81,8 +82,7 @@ async def test_switching_providers_does_not_duplicate_widget_ids(tmp_path, monke
         # Click each provider button in turn.  If remove_children isn't
         # awaited, the second mount of any provider button will raise
         # DuplicateIds.
-        provider_ids = ["provider-openai", "provider-anthropic",
-                        "provider-openrouter", "provider-anthropic"]
+        provider_ids = ["provider-openai", "provider-anthropic", "provider-openrouter", "provider-anthropic"]
         for pid in provider_ids:
             try:
                 await pilot.click(f"#{pid}")

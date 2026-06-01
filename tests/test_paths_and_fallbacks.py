@@ -3,6 +3,7 @@
 These cover behaviour added across mathstuf #7 (expanduser), jmalobicky's
 parents=True, and eduspano's empty-ollama-model fallback.
 """
+
 from pathlib import Path
 
 from meeting_notes.note_maker import NoteMaker

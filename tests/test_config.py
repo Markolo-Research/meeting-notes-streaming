@@ -1,4 +1,5 @@
 """Tests for AppConfig: defaults, serialisation, validation."""
+
 from meeting_notes.config import AppConfig, validate_config
 
 
@@ -25,13 +26,15 @@ def test_recording_retention_roundtrips_through_dict():
 
 
 def test_parakeet_cpp_config_roundtrips_through_dict():
-    cfg = AppConfig.from_dict({
-        "transcription_backend": "parakeet-cpp",
-        "parakeet_cpp_cli": "/tmp/parakeet-cli",
-        "parakeet_cpp_model": "/tmp/model.gguf",
-        "parakeet_cpp_threads": 4,
-        "parakeet_cpp_args": "--decoder ctc",
-    })
+    cfg = AppConfig.from_dict(
+        {
+            "transcription_backend": "parakeet-cpp",
+            "parakeet_cpp_cli": "/tmp/parakeet-cli",
+            "parakeet_cpp_model": "/tmp/model.gguf",
+            "parakeet_cpp_threads": 4,
+            "parakeet_cpp_args": "--decoder ctc",
+        }
+    )
 
     assert cfg.transcription_backend == "parakeet-cpp"
     assert cfg.parakeet_cpp_cli == "/tmp/parakeet-cli"
@@ -52,10 +55,12 @@ def test_terminal_file_browser_defaults_to_empty():
 
 def test_unknown_keys_in_from_dict_are_ignored():
     """Old/unknown config keys should not crash from_dict."""
-    cfg = AppConfig.from_dict({
-        "ai_provider": "anthropic",
-        "future_field_we_dont_know_about": "value",
-    })
+    cfg = AppConfig.from_dict(
+        {
+            "ai_provider": "anthropic",
+            "future_field_we_dont_know_about": "value",
+        }
+    )
     assert cfg.ai_provider == "anthropic"
 
 
@@ -70,20 +75,20 @@ def test_validate_rejects_unknown_provider():
     cfg = AppConfig(ai_provider="not-a-real-provider")
     ok, err = validate_config(cfg)
     assert not ok
+    assert err is not None
     assert "ai_provider" in err.lower()
 
 
 def test_validate_rejects_invalid_anthropic_model():
-    cfg = AppConfig(ai_provider="anthropic", ai_model="not-a-real-model",
-                    anthropic_api_key="sk-ant-test")
+    cfg = AppConfig(ai_provider="anthropic", ai_model="not-a-real-model", anthropic_api_key="test-key")
     ok, err = validate_config(cfg)
     assert not ok
+    assert err is not None
     assert "ai_model" in err.lower()
 
 
 def test_validate_accepts_valid_anthropic_config():
-    cfg = AppConfig(ai_provider="anthropic", ai_model="haiku",
-                    anthropic_api_key="sk-ant-test")
+    cfg = AppConfig(ai_provider="anthropic", ai_model="haiku", anthropic_api_key="sk-ant-test")
     ok, err = validate_config(cfg)
     assert ok, f"expected valid, got error: {err}"
 

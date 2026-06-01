@@ -210,7 +210,7 @@ def open_audio_source(record_path: str | None) -> tuple[subprocess.Popen, "wave.
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    p = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     p.add_argument("--socket", default=DEFAULT_SOCKET)
     p.add_argument("--save-transcript", help="On exit, write the concatenated final transcript here")
     p.add_argument("--record-path", help="Tee captured audio to this wav (recovery backup)")

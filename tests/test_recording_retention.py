@@ -7,6 +7,7 @@ is tolerable, and these tests document the expected behaviour clearly.
 
 If the implementation in app.py changes, this file is the spec.
 """
+
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -106,17 +107,20 @@ def test_files_at_exactly_the_boundary_are_kept(tmp_path):
     assert edge.exists()
 
 
-@pytest.mark.parametrize("days_old,retention,should_delete", [
-    (1, 30, False),
-    (29, 30, False),
-    (31, 30, True),
-    (60, 30, True),
-    # A file aged exactly N days vs N-day retention races the cutoff
-    # because _set_age runs microseconds before _cleanup samples now().
-    # Skip the exact-equal case and just test clearly above/below.
-    (5, 1, True),
-    (0, 1, False),
-])
+@pytest.mark.parametrize(
+    "days_old,retention,should_delete",
+    [
+        (1, 30, False),
+        (29, 30, False),
+        (31, 30, True),
+        (60, 30, True),
+        # A file aged exactly N days vs N-day retention races the cutoff
+        # because _set_age runs microseconds before _cleanup samples now().
+        # Skip the exact-equal case and just test clearly above/below.
+        (5, 1, True),
+        (0, 1, False),
+    ],
+)
 def test_retention_boundary_table(tmp_path, days_old, retention, should_delete):
     f = tmp_path / "x.wav"
     f.write_bytes(b"x")

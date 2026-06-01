@@ -35,12 +35,13 @@ def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("wav", help="16kHz mono s16le wav file")
     p.add_argument("--socket", default="/tmp/parakeet-stream.sock")
-    p.add_argument("--realtime", action="store_true",
-                   help="Pace audio at real-time speed (simulate mic)")
-    p.add_argument("--chunk-ms", type=int, default=160,
-                   help="Audio chunk size sent per write (matches server chunk by default)")
-    p.add_argument("--final-only", action="store_true",
-                   help="Print only concatenated final text on stdout (pipeline mode)")
+    p.add_argument("--realtime", action="store_true", help="Pace audio at real-time speed (simulate mic)")
+    p.add_argument(
+        "--chunk-ms", type=int, default=160, help="Audio chunk size sent per write (matches server chunk by default)"
+    )
+    p.add_argument(
+        "--final-only", action="store_true", help="Print only concatenated final text on stdout (pipeline mode)"
+    )
     args = p.parse_args()
 
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -74,7 +75,7 @@ def main() -> int:
                             print(f"\nFINAL ({msg.get('duration_s', 0):.1f}s): {msg['final']}")
                     elif "status" in msg:
                         if not args.final_only:
-                            print(f"[{msg['status']}] {json.dumps({k:v for k,v in msg.items() if k!='status'})}")
+                            print(f"[{msg['status']}] {json.dumps({k: v for k, v in msg.items() if k != 'status'})}")
                     elif "error" in msg:
                         print(f"ERROR: {msg['error']}", file=sys.stderr)
         except socket.timeout:

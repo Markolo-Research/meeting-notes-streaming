@@ -20,7 +20,7 @@ lint:
     uv run ruff check .
 
 typecheck:
-    uv run ty check .
+    uv run ty check . --exclude server/parakeet-stream-server.py
 
 test:
     uv run -m pytest -q

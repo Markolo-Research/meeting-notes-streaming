@@ -42,7 +42,7 @@ def test_capture_cmd_modes(tmp_path, monkeypatch):
 
     rec_sys = StreamingAudioRecorder(output_dir=str(tmp_path), mode="system")
     cmd = rec_sys._build_capture_cmd()
-    assert "fake-sink.monitor" in cmd and "default" not in cmd[:cmd.index("fake-sink.monitor")]
+    assert "fake-sink.monitor" in cmd and "default" not in cmd[: cmd.index("fake-sink.monitor")]
     assert "-filter_complex" not in cmd
 
     rec_comb = StreamingAudioRecorder(output_dir=str(tmp_path), mode="combined")
@@ -60,10 +60,10 @@ def test_capture_cmd_modes(tmp_path, monkeypatch):
 def test_deinterleave_stereo_s16le():
     """L/R samples come out in the right channels."""
     # Two frames: L=0x1234, R=0x5678; then L=0x0001, R=0xfffe (treated as signed below)
-    stereo = bytes([0x34, 0x12, 0x78, 0x56, 0x01, 0x00, 0xfe, 0xff])
+    stereo = bytes([0x34, 0x12, 0x78, 0x56, 0x01, 0x00, 0xFE, 0xFF])
     left, right = _deinterleave_stereo_s16le(stereo)
     assert left == bytes([0x34, 0x12, 0x01, 0x00])
-    assert right == bytes([0x78, 0x56, 0xfe, 0xff])
+    assert right == bytes([0x78, 0x56, 0xFE, 0xFF])
     # An odd trailing partial frame is dropped, not raised.
     left2, right2 = _deinterleave_stereo_s16le(stereo + b"\xaa")
     assert (left2, right2) == (left, right)
@@ -74,13 +74,15 @@ def test_parakeet_cpp_transcriber_parses_cli_json(tmp_path):
     audio.write_bytes(b"RIFF")
 
     completed = subprocess_result(
-        stdout=json.dumps({
-            "text": "hello world",
-            "words": [
-                {"w": "hello", "start": 0.0, "end": 0.4, "conf": 0.9},
-                {"w": "world", "start": 0.5, "end": 0.9, "conf": 0.8},
-            ],
-        }),
+        stdout=json.dumps(
+            {
+                "text": "hello world",
+                "words": [
+                    {"w": "hello", "start": 0.0, "end": 0.4, "conf": 0.9},
+                    {"w": "world", "start": 0.5, "end": 0.9, "conf": 0.8},
+                ],
+            }
+        ),
         returncode=0,
     )
 
@@ -117,10 +119,7 @@ def subprocess_result(stdout: str, returncode: int):
 def test_tokens_with_times_handles_long_growing_partial_timeline():
     """Long meetings emit many cumulative partials; timestamping must stay linear."""
     tokens = [f"word{i}" for i in range(2500)]
-    partials = [
-        Partial(elapsed_s=float(i), text=" ".join(tokens[: i + 1]))
-        for i in range(len(tokens))
-    ]
+    partials = [Partial(elapsed_s=float(i), text=" ".join(tokens[: i + 1])) for i in range(len(tokens))]
 
     mapped_tokens, times = _tokens_with_times(partials, " ".join(tokens))
 
@@ -203,8 +202,9 @@ def fake_server(tmp_path):
         conn, _ = srv.accept()
         try:
             conn.sendall(
-                (json.dumps({"status": "ready", "sample_rate": 16000,
-                             "chunk_ms": 160, "latency_ms": 560}) + "\n").encode()
+                (
+                    json.dumps({"status": "ready", "sample_rate": 16000, "chunk_ms": 160, "latency_ms": 560}) + "\n"
+                ).encode()
             )
             # Emit two partials as bytes arrive
             partial_count = 0
@@ -215,15 +215,9 @@ def fake_server(tmp_path):
                 received.extend(chunk)
                 partial_count += 1
                 if partial_count <= 2:
-                    conn.sendall(
-                        (json.dumps({"partial": f"partial-{partial_count}"}) + "\n").encode()
-                    )
-            conn.sendall(
-                (json.dumps({"final": "the final text", "duration_s": 1.23}) + "\n").encode()
-            )
-            conn.sendall(
-                (json.dumps({"status": "closed", "backup": "/tmp/x.wav"}) + "\n").encode()
-            )
+                    conn.sendall((json.dumps({"partial": f"partial-{partial_count}"}) + "\n").encode())
+            conn.sendall((json.dumps({"final": "the final text", "duration_s": 1.23}) + "\n").encode())
+            conn.sendall((json.dumps({"status": "closed", "backup": "/tmp/x.wav"}) + "\n").encode())
         finally:
             conn.close()
             srv.close()
@@ -257,7 +251,7 @@ def test_streaming_recorder_tees_to_wav_and_socket(fake_server, tmp_path):
     socket_path, received = fake_server
 
     # Synthesize 0.5s of dummy PCM and stand in for pw-record
-    pcm = (b"\x00\x10" * 8000)  # 0.5s @ 16 kHz s16le
+    pcm = b"\x00\x10" * 8000  # 0.5s @ 16 kHz s16le
 
     class FakeProc:
         def __init__(self, data: bytes):
@@ -324,20 +318,17 @@ def dual_fake_server(tmp_path):
         buf = sessions[idx]
         try:
             conn.sendall(
-                (json.dumps({"status": "ready", "sample_rate": 16000,
-                             "chunk_ms": 160, "latency_ms": 560}) + "\n").encode()
+                (
+                    json.dumps({"status": "ready", "sample_rate": 16000, "chunk_ms": 160, "latency_ms": 560}) + "\n"
+                ).encode()
             )
             while True:
                 chunk = conn.recv(4096)
                 if not chunk:
                     break
                 buf.extend(chunk)
-            conn.sendall(
-                (json.dumps({"final": f"session-{idx}-final", "duration_s": 0.5}) + "\n").encode()
-            )
-            conn.sendall(
-                (json.dumps({"status": "closed", "backup": "/tmp/x.wav"}) + "\n").encode()
-            )
+            conn.sendall((json.dumps({"final": f"session-{idx}-final", "duration_s": 0.5}) + "\n").encode())
+            conn.sendall((json.dumps({"status": "closed", "backup": "/tmp/x.wav"}) + "\n").encode())
         finally:
             conn.close()
             session_done[idx].set()
@@ -371,8 +362,8 @@ def test_combined_mode_splits_into_two_streams(dual_fake_server, tmp_path):
     n_frames = 4000  # 0.25s @ 16 kHz
     arr = array.array("h")
     for i in range(n_frames):
-        arr.append(i % 1000 + 1)        # left / mic: positive
-        arr.append(-(i % 1000) - 1)     # right / sys: negative
+        arr.append(i % 1000 + 1)  # left / mic: positive
+        arr.append(-(i % 1000) - 1)  # right / sys: negative
     stereo_pcm = arr.tobytes()  # 4 bytes/frame
 
     class FakeProc:
@@ -401,7 +392,9 @@ def test_combined_mode_splits_into_two_streams(dual_fake_server, tmp_path):
         mode="combined",
     )
     # Skip the pactl probe — we don't actually use the sink name in this test.
-    recorder._default_sink_monitor = staticmethod(lambda: "fake.monitor")
+    from typing import Any, cast
+
+    cast(Any, recorder)._default_sink_monitor = lambda: "fake.monitor"
     with patch("meeting_notes.parakeet_stream.subprocess.Popen", return_value=FakeProc(stereo_pcm)):
         recorder.start_recording("dual.wav")
         time.sleep(0.4)
