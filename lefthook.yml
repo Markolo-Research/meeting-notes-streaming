@@ -1,0 +1,24 @@
+pre-commit:
+  parallel: true
+  commands:
+    ruff:
+      glob: "**/*.py"
+      run: uv run ruff check --fix {staged_files} && uv run ruff format {staged_files}
+      stage_fixed: true
+    gitleaks:
+      run: just secrets-staged
+    actionlint:
+      glob: ".github/workflows/*.{yml,yaml}"
+      run: actionlint {staged_files}
+    repo-guards:
+      run: just doctor-staged
+
+post-merge:
+  commands:
+    sync-if-needed:
+      run: just sync-if-needed
+
+post-checkout:
+  commands:
+    sync-if-needed:
+      run: just sync-if-needed
