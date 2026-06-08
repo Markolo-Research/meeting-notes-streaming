@@ -1,0 +1,7 @@
+{
+  "repoType": [
+    "python"
+  ],
+  "packageManager": "uv",
+  "requiresGeneratedCheck": false
+}
