@@ -12,8 +12,8 @@ meeting_notes.transcriber), which pulls in torch. CI deliberately skips
 this file to keep install time fast — see .github/workflows/ci.yml. To
 run locally:
 
-    pip install -e ".[all,dev]"
-    pytest tests/test_textual_smoke.py
+    uv sync --all-extras --group dev
+    uv run -m pytest tests/test_textual_smoke.py
 """
 
 import pytest
@@ -21,8 +21,8 @@ import pytest
 # Skip the entire module if the heavy deps (whisper / textual) aren't
 # installed. Avoids confusing import errors for contributors who only
 # installed the lightweight test deps.
-pytest.importorskip("whisper", reason="run `pip install -e .[all,dev]` to enable Textual smoke tests")
-pytest.importorskip("textual", reason="run `pip install -e .[all,dev]` to enable Textual smoke tests")
+pytest.importorskip("whisper", reason="run `uv sync --all-extras --group dev` to enable Textual smoke tests")
+pytest.importorskip("textual", reason="run `uv sync --all-extras --group dev` to enable Textual smoke tests")
 
 from meeting_notes.app import MeetingNotesApp  # noqa: E402  (deliberate import-after-skip)
 

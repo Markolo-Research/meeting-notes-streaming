@@ -25,16 +25,40 @@ require_symlink_target() {
 require_file "AGENTS.md"
 require_symlink_target "CLAUDE.md" "AGENTS.md"
 require_file "justfile"
+require_file "lefthook.yml"
 require_file "pyproject.toml"
-require_file "uv.lock"
+require_file "repo-standards.config.json"
 
-if find . -path ./.git -prune -o -path ./server -prune -o -path ./lefthook.yml -prune -o -name lefthook.yml -print | grep -q .; then
+if find . -path ./.git -prune -o -path ./lefthook.yml -prune -o -name lefthook.yml -print | grep -q .; then
     failures+=("nested lefthook.yml files are not allowed")
 fi
 
+for path in requirements.txt setup.py setup.cfg .pre-commit-config.yaml; do
+    if [[ -e "$path" ]]; then
+        failures+=("forbidden legacy file: $path")
+    fi
+done
+
+if [[ -d .husky ]]; then
+    failures+=("forbidden legacy hook directory: .husky")
+fi
+
+bare_tools_tmp="$(mktemp)"
+bare_tool_paths=()
+for path in .github Jenkinsfile justfile scripts setup.sh setup_local.sh setup_cloud.sh; do
+    if [[ -e "$path" ]]; then
+        bare_tool_paths+=("$path")
+    fi
+done
+if ((${#bare_tool_paths[@]})) && rg -n '(^|[;&|])[[:space:]]*(python|pip)([[:space:]]|$)' "${bare_tool_paths[@]}" \
+    --glob '!scripts/guards/repo-contract' >"$bare_tools_tmp"; then
+    failures+=("bare python/pip command references found: $(tr '\n' '; ' <"$bare_tools_tmp")")
+fi
+rm -f "$bare_tools_tmp"
+
 if [[ "$mode" == "full" ]]; then
     just_recipes="$(just --summary)"
-    for recipe in fmt fix fmt-check lint typecheck test test-fast secrets secrets-staged deps-check deps-check-fast doctor doctor-staged sync sync-if-needed check-changed check ci; do
+    for recipe in fmt fix fmt-check lint actions-hygiene typecheck test test-fast secrets secrets-staged deps-check deps-check-fast doctor doctor-staged sync sync-if-needed check-changed check ci; do
         if [[ ! " $just_recipes " =~ [[:space:]]${recipe}[[:space:]] ]]; then
             failures+=("justfile is missing required recipe: $recipe")
         fi

@@ -1,7 +1,7 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Cloud AI setup script for Meeting Notes AI
 
-set -e
+set -euo pipefail
 
 echo "=================================="
 echo "  Cloud AI Provider Setup"
@@ -10,19 +10,19 @@ echo
 echo "Choose your cloud AI provider:"
 echo
 echo "  1) OpenAI"
-echo "     - GPT-4o Mini (recommended, ~$0.002/meeting)"
-echo "     - GPT-4o (premium, ~$0.03/meeting)"
+echo "     - GPT-4o Mini (recommended, ~\$0.002/meeting)"
+echo "     - GPT-4o (premium, ~\$0.03/meeting)"
 echo "     - Get key at: https://platform.openai.com/api-keys"
 echo
 echo "  2) Anthropic"
-echo "     - Claude 3.5 Haiku (recommended, ~$0.01/meeting)"
-echo "     - Claude 3.5 Sonnet (premium, ~$0.03/meeting)"
+echo "     - Claude 3.5 Haiku (recommended, ~\$0.01/meeting)"
+echo "     - Claude 3.5 Sonnet (premium, ~\$0.03/meeting)"
 echo "     - Get key at: https://console.anthropic.com/settings/keys"
 echo
 echo "  3) OpenRouter"
 echo "     - Access 300+ models from one API"
-echo "     - Gemini Flash (cheapest, ~$0.001/meeting)"
-echo "     - Claude via OpenRouter (~$0.005/meeting)"
+echo "     - Gemini Flash (cheapest, ~\$0.001/meeting)"
+echo "     - Claude via OpenRouter (~\$0.005/meeting)"
 echo "     - Get key at: https://openrouter.ai/keys"
 echo
 read -p "Enter choice [1-3]: " PROVIDER_CHOICE
@@ -63,7 +63,7 @@ echo "Setting up $PROVIDER_NAME..."
 echo
 
 # Check if API key is in environment
-if [ -n "${!ENV_VAR}" ]; then
+if [ -n "${!ENV_VAR-}" ]; then
     echo "✓ Found $ENV_VAR in environment"
     API_KEY="${!ENV_VAR}"
 else
@@ -176,8 +176,7 @@ echo
 echo "Testing $PROVIDER_NAME API connection..."
 echo
 
-source venv/bin/activate
-python3 - "$PROVIDER" "$API_KEY" "$DEFAULT_MODEL" << 'PYEOF'
+UV_NO_EXCLUDE_NEWER=1 uv run --extra cloud python - "$PROVIDER" "$API_KEY" "$DEFAULT_MODEL" << 'PYEOF'
 import os
 import sys
 
@@ -229,7 +228,7 @@ except Exception as e:
     print("\nMake sure:")
     print("  1. Your API key is correct")
     print("  2. You have internet connection")
-    print(f"  3. Run: pip install {provider}")
+    print("  3. Run: uv sync --extra cloud")
     sys.exit(1)
 PYEOF
 
@@ -239,7 +238,7 @@ echo "  Next Steps"
 echo "=================================="
 echo
 echo "1. Start recording meetings:"
-echo "   python run.py"
+echo "   uv run meeting-notes"
 echo
 echo "2. Keyboard shortcuts:"
 echo "   r - Start recording"
@@ -251,7 +250,7 @@ echo
 echo "Note: You can change models or providers anytime in settings (press ',')"
 echo
 echo "1. Start recording meetings:"
-echo "   python run.py"
+echo "   uv run meeting-notes"
 echo
 echo "2. Press 'r' to start, 's' to stop"
 echo

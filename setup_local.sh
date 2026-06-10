@@ -1,26 +1,17 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Setup script for local AI (Ollama)
 
-set -e
+set -euo pipefail
 
 echo "🎙️  Meeting Notes AI - Setup"
 echo "=============================="
 echo ""
 
-# Check if running in virtual environment
-if [ -z "$VIRTUAL_ENV" ]; then
-    echo "📦 Creating virtual environment..."
-    python -m venv venv
-    echo "✅ Virtual environment created"
-    echo ""
-    echo "⚠️  Please activate the virtual environment and run this script again:"
-    echo "   source venv/bin/activate"
-    echo "   ./setup.sh"
-    exit 0
+if ! command -v uv &> /dev/null; then
+    echo "❌ uv not found. Install it first:"
+    echo "   https://docs.astral.sh/uv/getting-started/installation/"
+    exit 1
 fi
-
-echo "✅ Virtual environment detected: $VIRTUAL_ENV"
-echo ""
 
 # Check system dependencies
 echo "🔍 Checking system dependencies..."
@@ -42,14 +33,13 @@ echo ""
 
 # Install Python dependencies
 echo "📥 Installing Python dependencies..."
-pip install --upgrade pip
-pip install -r requirements.txt
+UV_NO_EXCLUDE_NEWER=1 uv sync --frozen --extra cloud --group dev
 
 echo ""
 echo "✅ Setup complete!"
 echo ""
 echo "🚀 To run the application:"
-echo "   python run.py"
+echo "   uv run meeting-notes"
 echo ""
 echo "📚 Read README.md for usage instructions"
 echo ""

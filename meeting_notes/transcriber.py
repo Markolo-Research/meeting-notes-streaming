@@ -244,7 +244,7 @@ if __name__ == "__main__":
     import sys
 
     if len(sys.argv) < 2:
-        print("Usage: python transcriber.py <audio_file>")
+        print("Usage: uv run -m meeting_notes.transcriber <audio_file>")
         sys.exit(1)
 
     transcriber = WhisperTranscriber()

@@ -61,7 +61,7 @@ class NoteMaker:
         if ai_provider in ["openai", "anthropic", "openrouter"]:
             if not CLOUD_AVAILABLE:
                 logger.warning("Cloud AI packages not installed")
-                print(f"Warning: Cloud AI packages not installed. Run: pip install openai anthropic openrouter")
+                print("Warning: Cloud AI packages not installed. Run: uv sync --extra cloud")
                 print("Disabling AI summarization")
                 self.ai_provider = "none"
             else:
