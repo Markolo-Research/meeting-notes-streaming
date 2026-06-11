@@ -1,0 +1,53 @@
+{
+  "last_scan": "2026-06-11",
+  "findings": [],
+  "deferred": [
+    {
+      "package": "torch",
+      "id": "CVE-2025-3000",
+      "aliases": [
+        "GHSA-rrmf-rvhw-rf47"
+      ],
+      "reason": "No patched version published in advisory; local-only torch.jit.script memory-corruption issue. Direct/transitive runtime dependency via openai-whisper and server NeMo/CUDA stack.",
+      "since": "2026-06-11",
+      "references": [
+        "https://github.com/advisories/GHSA-rrmf-rvhw-rf47",
+        "https://nvd.nist.gov/vuln/detail/CVE-2025-3000"
+      ]
+    },
+    {
+      "package": "torch",
+      "id": "CVE-2025-3001",
+      "aliases": [
+        "GHSA-qfhq-4f3w-5fph"
+      ],
+      "reason": "Server CUDA torch 2.9.1+cu129 still flagged by OSV; advisory points to an upstream commit but no PyPI/CUDA fixed release line available from scanner. Defer until PyTorch/NeMo-compatible patched wheel is available.",
+      "since": "2026-06-11",
+      "references": [
+        "https://github.com/advisories/GHSA-qfhq-4f3w-5fph"
+      ]
+    },
+    {
+      "package": "torch",
+      "id": "PYSEC-2026-139",
+      "reason": "Server CUDA torch 2.9.1+cu129 flagged for local pt2 loading deserialization issue; no fixed version available in OSV/scanner output. Defer until compatible patched wheel is available.",
+      "since": "2026-06-11",
+      "references": [
+        "https://osv.dev/vulnerability/PYSEC-2026-139"
+      ]
+    }
+  ],
+  "thinning_candidates": [
+    {
+      "package": "openai-whisper",
+      "reason": "Main TUI pulls in torch for local transcription; keep for now because local transcription is core functionality, but revisit if Parakeet/server path replaces Whisper."
+    },
+    {
+      "package": "nemo_toolkit[asr]",
+      "reason": "Server ASR stack brings a large CUDA dependency graph; keep while Parakeet streaming server is active, but isolate from main TUI environment."
+    }
+  ],
+  "notes": [
+    "2026-06-11: First baseline. Main uv export audited with pip-audit: 1 torch finding (CVE-2025-3000/GHSA-rrmf-rvhw-rf47), no fix version. Server pip-audit blocked by VCS nemo-toolkit hash handling, so server lock was audited via OSV batch (196 packages). Server aiohttp 3.13.5->3.14.1 clears GHSA-hg6j-4rv6-33pg and GHSA-jg22-mg44-37j8. Server re-audit now reports only torch advisories."
+  ]
+}
