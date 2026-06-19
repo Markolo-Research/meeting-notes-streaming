@@ -1,0 +1,82 @@
+{
+  "repoType": [
+    "python"
+  ],
+  "packageManager": "uv",
+  "requiresGeneratedCheck": false,
+  "selfHostedRunnerLabels": [
+    "self-hosted",
+    "linux",
+    "x64",
+    "markolo-hetzner",
+    "ci-light"
+  ],
+  "requiredFiles": [
+    "AGENTS.md",
+    "CHANGELOG.md",
+    ".gitignore",
+    "pyproject.toml",
+    "uv.lock",
+    "justfile",
+    "lefthook.yml",
+    ".github/actionlint.yaml",
+    "commitlint.config.cjs",
+    "scripts/guards/repo-contract",
+    "scripts/guards/secrets",
+    "scripts/guards/secrets-staged",
+    "scripts/guards/python-slop-scan",
+    "scripts/guards/python-slop-baseline.json"
+  ],
+  "requiredSymlinks": [
+    {
+      "path": "CLAUDE.md",
+      "target": "AGENTS.md"
+    },
+    {
+      "path": ".claude/skills",
+      "target": "../.agents/skills"
+    }
+  ],
+  "requiredWorkflows": [
+    "actions-hygiene.yml",
+    "commitlint.yml",
+    "contract.yml",
+    "python-lint.yml",
+    "python-tests.yml",
+    "secrets.yml"
+  ],
+  "requiredJustRecipes": [
+    "fmt",
+    "fix",
+    "fmt-check",
+    "lint",
+    "typecheck",
+    "test",
+    "test-fast",
+    "secrets",
+    "secrets-staged",
+    "deps-check",
+    "deps-check-fast",
+    "actions-hygiene",
+    "doctor",
+    "doctor-staged",
+    "sync",
+    "sync-if-needed",
+    "check-changed",
+    "check",
+    "slop-scan",
+    "slop-scan-duplication"
+  ],
+  "allowBarePythonIn": [
+    "setup.sh",
+    "setup_local.sh",
+    "setup_cloud.sh",
+    "run.py"
+  ],
+  "allowedPackageManagerFiles": [
+    "requirements.txt"
+  ],
+  "suppressionBudget": {
+    "total": 0
+  }
+}

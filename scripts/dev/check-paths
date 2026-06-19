@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "$#" -eq 0 ]; then
+  echo "Usage: scripts/dev/check-paths <path> [<path> ...]" >&2
+  exit 2
+fi
+
+paths=("$@")
+python_paths=()
+test_paths=()
+for path in "${paths[@]}"; do
+  name="$(basename "$path")"
+  if [[ -d "$path" || "$name" == *.py ]]; then
+    python_paths+=("$path")
+  fi
+  if [[ -d "$path" && "$path" == tests* ]]; then
+    test_paths+=("$path")
+  elif [[ "$path" == tests/* && ( "$name" == test_*.py || "$name" == *_test.py ) ]]; then
+    test_paths+=("$path")
+  fi
+done
+
+if [ "${#python_paths[@]}" -gt 0 ]; then
+  uvx ruff@0.15.12 check "${python_paths[@]}"
+  uvx ruff@0.15.12 format --check "${python_paths[@]}"
+  uvx ty@0.0.33 check "${python_paths[@]}"
+else
+  echo "No Python paths passed; skipped ruff and ty."
+fi
+
+if [ "${#test_paths[@]}" -gt 0 ]; then
+  uv run -m pytest -q "${test_paths[@]}"
+else
+  echo "No test paths passed; skipped pytest."
+fi

@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$ROOT_DIR"
+
+standards_root="${REPO_STANDARDS_LOCAL:-$ROOT_DIR/../markolo-shared}"
+cli="$standards_root/packages/repo-standards/dist/cli.js"
+
+if [[ ! -f "$cli" ]]; then
+  case "${1:-}" in
+  sync-if-needed | doctor | secrets | secrets-staged)
+    cat >&2 <<'MSG'
+repo-standards is unavailable; skipping maintainer-only repo guard.
+Normal consumers can run project lint, typecheck, tests, and slop-scan without markolo-shared access.
+MSG
+    exit 0
+    ;;
+  esac
+  echo "repo-standards CLI not found at $cli" >&2
+  exit 1
+fi
+
+exec node "$cli" "$@" --root "$ROOT_DIR" --config repo-standards.config.json

@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$ROOT_DIR"
+
+uv run ruff check .
+uv run ruff format --check .
+
+shell_files=()
+while IFS= read -r file; do
+  shell_files+=("$file")
+done < <(find scripts -maxdepth 2 -type f \( -name '*.sh' -o -name '_repo-standards' -o -name 'deps-check' -o -name 'deps-check-fast' -o -name 'repo-contract' -o -name 'secrets' -o -name 'secrets-staged' \) | sort)
+
+if [ "${#shell_files[@]}" -gt 0 ]; then
+  shellcheck -x --severity=warning "${shell_files[@]}"
+fi

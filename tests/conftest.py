@@ -1,4 +1,5 @@
 """Shared pytest fixtures and config."""
+
 import os
 import sys
 from pathlib import Path

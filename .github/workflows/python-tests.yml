@@ -1,0 +1,49 @@
+name: Python Tests
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/*.py"
+      - "scripts/guards/python-slop-scan"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/python-tests.yml"
+  pull_request:
+    paths:
+      - "**/*.py"
+      - "scripts/guards/python-slop-scan"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/python-tests.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  pytest:
+    runs-on: ${{ fromJSON(vars.MARKOLO_CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          persist-credentials: false
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
+        with:
+          enable-cache: false
+
+      - name: Setup Python
+        run: uv python install 3.14
+
+      - name: Sync dependencies
+        run: uv sync --extra all --extra dev
+
+      - name: Run tests
+        run: uv run -m pytest -x --tb=short --durations=25 --durations-min=0.2

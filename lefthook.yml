@@ -1,0 +1,44 @@
+pre-commit:
+  parallel: true
+  commands:
+    ruff:
+      glob: "**/*.py"
+      run: uv run ruff check --fix {staged_files} && uv run ruff format {staged_files}
+      stage_fixed: true
+    shellcheck:
+      glob: "*.{sh,bash}"
+      run: shellcheck -x --severity=warning {staged_files}
+    gitleaks:
+      run: just secrets-staged
+    actionlint:
+      glob: ".github/workflows/*.{yml,yaml}"
+      run: actionlint {staged_files}
+    repo-guards:
+      run: just doctor-staged
+
+commit-msg:
+  commands:
+    commitlint:
+      run: npx --yes --package @commitlint/cli@20.1.0 --package @commitlint/config-conventional@20.0.0 commitlint --config commitlint.config.cjs --edit {1}
+
+pre-push:
+  parallel: true
+  commands:
+    typecheck:
+      run: just typecheck
+    fast-tests:
+      run: just test-fast
+    dependency-shape:
+      run: just deps-check-fast
+    slop-scan:
+      run: just slop-scan
+
+post-merge:
+  commands:
+    sync-if-needed:
+      run: just sync-if-needed
+
+post-checkout:
+  commands:
+    sync-if-needed:
+      run: just sync-if-needed

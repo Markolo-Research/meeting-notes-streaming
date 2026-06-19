@@ -1,0 +1,20 @@
+{
+  "jscpd": {
+    "duplicated_lines": 0,
+    "duplicates": 0,
+    "percentage": 0.0
+  },
+  "ruff_strict": {
+    "by_rule": {
+      "C901": 3,
+      "FBT001": 2,
+      "PLR0912": 3,
+      "PLR0913": 2,
+      "PLR0915": 1
+    },
+    "total": 11
+  },
+  "vulture": {
+    "total": 0
+  }
+}

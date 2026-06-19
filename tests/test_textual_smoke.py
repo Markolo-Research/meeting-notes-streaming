@@ -15,6 +15,7 @@ run locally:
     pip install -e ".[all,dev]"
     pytest tests/test_textual_smoke.py
 """
+
 import pytest
 
 # Skip the entire module if the heavy deps (whisper / textual) aren't
@@ -23,7 +24,11 @@ import pytest
 pytest.importorskip("whisper", reason="run `pip install -e .[all,dev]` to enable Textual smoke tests")
 pytest.importorskip("textual", reason="run `pip install -e .[all,dev]` to enable Textual smoke tests")
 
-from meeting_notes.app import MeetingNotesApp  # noqa: E402  (deliberate import-after-skip)
+
+def build_app():
+    from meeting_notes.app import MeetingNotesApp
+
+    return MeetingNotesApp()
 
 
 @pytest.mark.asyncio
@@ -33,7 +38,7 @@ async def test_app_starts_and_exits_cleanly(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.chdir(tmp_path)
 
-    app = MeetingNotesApp()
+    app = build_app()
     async with app.run_test() as pilot:
         # Just let the app stabilise. If anything raises during mount,
         # we'd see it here.
@@ -49,7 +54,7 @@ async def test_settings_screen_opens(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.chdir(tmp_path)
 
-    app = MeetingNotesApp()
+    app = build_app()
     async with app.run_test() as pilot:
         await pilot.pause()
         await pilot.press(",")
@@ -72,7 +77,7 @@ async def test_switching_providers_does_not_duplicate_widget_ids(tmp_path, monke
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.chdir(tmp_path)
 
-    app = MeetingNotesApp()
+    app = build_app()
     async with app.run_test() as pilot:
         await pilot.pause()
         await pilot.press(",")  # open settings
@@ -81,8 +86,7 @@ async def test_switching_providers_does_not_duplicate_widget_ids(tmp_path, monke
         # Click each provider button in turn.  If remove_children isn't
         # awaited, the second mount of any provider button will raise
         # DuplicateIds.
-        provider_ids = ["provider-openai", "provider-anthropic",
-                        "provider-openrouter", "provider-anthropic"]
+        provider_ids = ["provider-openai", "provider-anthropic", "provider-openrouter", "provider-anthropic"]
         for pid in provider_ids:
             try:
                 await pilot.click(f"#{pid}")

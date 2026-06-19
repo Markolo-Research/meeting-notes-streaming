@@ -5,6 +5,7 @@ configured in MODELS dicts haven't drifted from what the providers actually
 accept. If a provider deprecates a model, you'd update both the constant
 here and the source.
 """
+
 from meeting_notes.ai_summarizer import (
     AnthropicSummarizer,
     OpenAISummarizer,
@@ -55,6 +56,7 @@ def test_openrouter_models_have_required_fields():
 def test_anthropic_summarizer_requires_api_key(monkeypatch):
     """Without an API key (and no env var), construction should fail clearly."""
     import pytest
+
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     with pytest.raises(ValueError, match="API key"):
         AnthropicSummarizer(api_key=None, model="haiku")
@@ -63,5 +65,6 @@ def test_anthropic_summarizer_requires_api_key(monkeypatch):
 def test_anthropic_summarizer_rejects_unknown_model():
     """Unknown model tier should not be silently accepted."""
     import pytest
+
     with pytest.raises((KeyError, ValueError)):
         AnthropicSummarizer(api_key="sk-ant-test", model="not-a-tier")

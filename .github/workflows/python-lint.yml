@@ -1,0 +1,97 @@
+name: Python Lint & Type Check
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/*.py"
+      - "pyproject.toml"
+      - "justfile"
+      - "repo-standards.config.json"
+      - "scripts/guards/python-slop-baseline.json"
+      - "scripts/guards/python-slop-scan"
+      - ".github/workflows/python-lint.yml"
+  pull_request:
+    paths:
+      - "**/*.py"
+      - "pyproject.toml"
+      - "justfile"
+      - "repo-standards.config.json"
+      - "scripts/guards/python-slop-baseline.json"
+      - "scripts/guards/python-slop-scan"
+      - ".github/workflows/python-lint.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  ruff:
+    runs-on: ${{ fromJSON(vars.MARKOLO_CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          persist-credentials: false
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
+        with:
+          enable-cache: false
+
+      - name: Setup Python
+        run: uv python install 3.14
+
+      - name: Ruff check
+        run: uvx ruff check .
+
+      - name: Ruff format check
+        run: uvx ruff format --check .
+
+  ty:
+    runs-on: ${{ fromJSON(vars.MARKOLO_CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          persist-credentials: false
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
+        with:
+          enable-cache: false
+
+      - name: Setup Python
+        run: uv python install 3.14
+
+      - name: Sync dependencies
+        run: uv sync --extra all --extra dev
+
+      - name: ty check
+        run: uv run ty check
+
+  slop-scan:
+    runs-on: ${{ fromJSON(vars.MARKOLO_CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          persist-credentials: false
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
+        with:
+          enable-cache: false
+
+      - name: Setup Python
+        run: uv python install 3.14
+
+      - name: Sync dependencies
+        run: uv sync --extra all --extra dev
+
+      - name: Python slop-scan
+        run: scripts/guards/python-slop-scan

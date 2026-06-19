@@ -50,7 +50,9 @@ all = [
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
+    "pytest-xdist>=3.8.0",
     "ruff>=0.4",
+    "ty>=0.0.1a13",
 ]
 
 [tool.pytest.ini_options]
@@ -74,6 +76,19 @@ ignore = [
     "B008",  # function call in default argument — used in some Textual patterns
     "B904",  # raise ... from err — pre-existing, would change tracebacks visibly
     "B005",  # strip with multi-character — pre-existing, single occurrence, low risk
+]
+
+[tool.ty.rules]
+unresolved-import = "ignore"
+
+[tool.ty.src]
+include = ["meeting_notes"]
+exclude = [
+    "**/.*",
+    "meeting_notes/ai_summarizer.py",
+    "meeting_notes/app.py",
+    "meeting_notes/settings.py",
+    "tests/**",
 ]
 
 [project.scripts]
