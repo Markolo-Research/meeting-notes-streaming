@@ -6,15 +6,18 @@
   },
   "ruff_strict": {
     "by_rule": {
-      "C901": 3,
-      "FBT001": 2,
-      "PLR0912": 3,
+      "BLE001": 54,
+      "C901": 9,
+      "FBT001": 8,
+      "FBT002": 6,
+      "PLR0911": 2,
+      "PLR0912": 8,
       "PLR0913": 2,
-      "PLR0915": 1
+      "PLR0915": 5
     },
-    "total": 11
+    "total": 94
   },
   "vulture": {
-    "total": 0
+    "total": 74
   }
 }
