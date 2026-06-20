@@ -1,6 +1,7 @@
 """Tests for AppConfig: defaults, serialisation, validation."""
 
 from meeting_notes.config import AppConfig, validate_config
+from meeting_notes.ai_models import PROVIDERS, configured_api_key
 
 
 def test_default_recording_retention_days():
@@ -67,6 +68,22 @@ def test_validate_accepts_valid_anthropic_config():
     cfg = AppConfig(ai_provider="anthropic", ai_model="haiku", anthropic_api_key="sk-ant-test")
     ok, err = validate_config(cfg)
     assert ok, f"expected valid, got error: {err}"
+
+
+def test_config_validation_uses_canonical_provider_catalog():
+    assert set(PROVIDERS) == {"openai", "anthropic", "openrouter", "local", "none"}
+
+    cfg = AppConfig(ai_provider="openai", ai_model="standard", openai_api_key="sk-test")
+    ok, err = validate_config(cfg)
+
+    assert ok, err
+
+
+def test_configured_api_key_prefers_config_over_env(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "env-key")
+    cfg = AppConfig(ai_provider="openai", openai_api_key="config-key")
+
+    assert configured_api_key(cfg, "openai") == "config-key"
 
 
 def test_validate_none_provider_is_always_valid():

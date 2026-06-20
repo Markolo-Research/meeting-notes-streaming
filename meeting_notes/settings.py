@@ -11,6 +11,7 @@ from textual.reactive import reactive
 from textual import work
 
 from meeting_notes.config import AppConfig, save_config, validate_config, get_config_path
+from meeting_notes.ai_models import PROVIDERS
 from meeting_notes.ollama_utils import (
     get_installed_models,
     get_recommended_models,
@@ -365,23 +366,15 @@ class SettingsScreen(Screen):
 
         current_provider = self.config.get("ai_provider", "none")
 
-        providers = [
-            ("openai", "OpenAI (GPT-4o Mini/4o)", "Fast, cheap, great quality"),
-            ("anthropic", "Anthropic (Claude)", "Excellent quality, best for action items"),
-            ("openrouter", "OpenRouter", "Access to 300+ models"),
-            ("local", "Local (Ollama)", "Private, offline, slow"),
-            ("none", "No AI", "Just transcripts, no summary"),
-        ]
-
-        for provider_id, provider_name, provider_desc in providers:
+        for provider_id, provider in PROVIDERS.items():
             is_current = provider_id == current_provider
             marker = "●" if is_current else "○"
-            label = f"{marker} {provider_name}"
+            label = f"{marker} {provider.label}"
             btn = Button(label, id=f"provider-{provider_id}", variant="primary" if is_current else "default")
             btn.provider_id = provider_id
             widgets.append(btn)
             if is_current:
-                widgets.append(Static(f"  → {provider_desc}", classes="settings-hint"))
+                widgets.append(Static(f"  → {provider.description}", classes="settings-hint"))
 
         widgets.append(Static(""))  # Spacer
 
@@ -415,21 +408,16 @@ class SettingsScreen(Screen):
         widgets.append(Static("Model", classes="settings-label"))
         current_model = self.config.get("ai_model", "mini")
 
-        models = [
-            ("mini", "GPT-4o Mini", "~$0.001/meeting - Ultra cheap"),
-            ("standard", "GPT-4o", "~$0.015/meeting - Best quality"),
-        ]
-
-        for model_id, model_name, model_desc in models:
+        for model_id, model in PROVIDERS["openai"].models.items():
             is_current = model_id == current_model
             marker = "●" if is_current else "○"
             btn = Button(
-                f"{marker} {model_name}", id=f"aimodel-{model_id}", variant="primary" if is_current else "default"
+                f"{marker} {model['name']}", id=f"aimodel-{model_id}", variant="primary" if is_current else "default"
             )
             btn.model_id = model_id
             widgets.append(btn)
             if is_current:
-                widgets.append(Static(f"  → {model_desc}", classes="settings-hint"))
+                widgets.append(Static(f"  → {model['description']}", classes="settings-hint"))
 
         # API Key
         widgets.append(Static("API Key", classes="settings-label"))
@@ -456,21 +444,16 @@ class SettingsScreen(Screen):
         widgets.append(Static("Model", classes="settings-label"))
         current_model = self.config.get("ai_model", "haiku")
 
-        models = [
-            ("haiku", "Claude Haiku 4.5", "~$0.005/meeting - Fast & affordable ⭐"),
-            ("sonnet", "Claude Sonnet 4.6", "~$0.020/meeting - Best quality"),
-        ]
-
-        for model_id, model_name, model_desc in models:
+        for model_id, model in PROVIDERS["anthropic"].models.items():
             is_current = model_id == current_model
             marker = "●" if is_current else "○"
             btn = Button(
-                f"{marker} {model_name}", id=f"aimodel-{model_id}", variant="primary" if is_current else "default"
+                f"{marker} {model['name']}", id=f"aimodel-{model_id}", variant="primary" if is_current else "default"
             )
             btn.model_id = model_id
             widgets.append(btn)
             if is_current:
-                widgets.append(Static(f"  → {model_desc}", classes="settings-hint"))
+                widgets.append(Static(f"  → {model['description']}", classes="settings-hint"))
 
         # API Key
         widgets.append(Static("API Key", classes="settings-label"))
@@ -497,22 +480,16 @@ class SettingsScreen(Screen):
         widgets.append(Static("Model Tier", classes="settings-label"))
         current_model = self.config.get("ai_model", "balanced")
 
-        models = [
-            ("cheap", "Cheap (Gemini Flash)", "~$0.001/meeting"),
-            ("balanced", "Balanced (Claude Haiku)", "~$0.01/meeting ⭐"),
-            ("premium", "Premium (Claude Sonnet)", "~$0.03/meeting"),
-        ]
-
-        for model_id, model_name, model_desc in models:
+        for model_id, model in PROVIDERS["openrouter"].models.items():
             is_current = model_id == current_model
             marker = "●" if is_current else "○"
             btn = Button(
-                f"{marker} {model_name}", id=f"aimodel-{model_id}", variant="primary" if is_current else "default"
+                f"{marker} {model['name']}", id=f"aimodel-{model_id}", variant="primary" if is_current else "default"
             )
             btn.model_id = model_id
             widgets.append(btn)
             if is_current:
-                widgets.append(Static(f"  → {model_desc}", classes="settings-hint"))
+                widgets.append(Static(f"  → {model['description']}", classes="settings-hint"))
 
         # API Key
         widgets.append(Static("API Key", classes="settings-label"))

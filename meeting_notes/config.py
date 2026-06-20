@@ -7,6 +7,7 @@ from typing import Dict, Any, Optional
 from dataclasses import dataclass, asdict
 
 from .logger import get_logger
+from .ai_models import PROVIDERS, configured_api_key
 
 logger = get_logger(__name__)
 
@@ -142,45 +143,26 @@ def validate_config(config: AppConfig) -> tuple[bool, Optional[str]]:
         (is_valid, error_message)
     """
     # Validate AI provider
-    valid_providers = ["openai", "anthropic", "openrouter", "local", "none"]
+    valid_providers = list(PROVIDERS)
     if config.ai_provider not in valid_providers:
         return False, f"Invalid ai_provider: {config.ai_provider}. Must be one of {valid_providers}"
 
     # Check for API keys based on provider
-    import os
-
-    if config.ai_provider == "openai":
-        api_key = config.openai_api_key or os.getenv("OPENAI_API_KEY")
+    provider_spec = PROVIDERS[config.ai_provider]
+    if provider_spec.env_var:
+        api_key = configured_api_key(config, config.ai_provider)
         if not api_key:
             return False, (
-                "ai_provider is 'openai' but no API key found.\n"
-                "Set OPENAI_API_KEY environment variable or openai_api_key in config"
+                f"ai_provider is '{config.ai_provider}' but no API key found.\n"
+                f"Set {provider_spec.env_var} environment variable or {provider_spec.api_key_field} in config"
             )
-        valid_models = ["mini", "standard"]
+    if provider_spec.models:
+        valid_models = list(provider_spec.models)
         if config.ai_model not in valid_models:
-            return False, f"Invalid ai_model for OpenAI: {config.ai_model}. Must be one of {valid_models}"
-
-    elif config.ai_provider == "anthropic":
-        api_key = config.anthropic_api_key or os.getenv("ANTHROPIC_API_KEY")
-        if not api_key:
-            return False, (
-                "ai_provider is 'anthropic' but no API key found.\n"
-                "Set ANTHROPIC_API_KEY environment variable or anthropic_api_key in config"
+            return (
+                False,
+                f"Invalid ai_model for {provider_spec.label}: {config.ai_model}. Must be one of {valid_models}",
             )
-        valid_models = ["haiku", "sonnet"]
-        if config.ai_model not in valid_models:
-            return False, f"Invalid ai_model for Anthropic: {config.ai_model}. Must be one of {valid_models}"
-
-    elif config.ai_provider == "openrouter":
-        api_key = config.openrouter_api_key or os.getenv("OPENROUTER_API_KEY")
-        if not api_key:
-            return False, (
-                "ai_provider is 'openrouter' but no API key found.\n"
-                "Set OPENROUTER_API_KEY environment variable or openrouter_api_key in config"
-            )
-        valid_models = ["cheap", "balanced", "premium"]
-        if config.ai_model not in valid_models:
-            return False, f"Invalid ai_model for OpenRouter: {config.ai_model}. Must be one of {valid_models}"
 
     # Validate whisper model
     valid_whisper = ["tiny", "base", "small", "medium", "large"]
