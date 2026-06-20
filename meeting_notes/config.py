@@ -107,11 +107,9 @@ def load_config() -> AppConfig:
         logger.info(f"Config loaded successfully (ai_provider: {config.ai_provider}, ai_model: {config.ai_model})")
         return config
 
-    except Exception as e:
+    except (OSError, TypeError, yaml.YAMLError) as e:
         logger.error(f"Could not load config from {config_path}: {e}", exc_info=True)
-        print(f"Warning: Could not load config from {config_path}: {e}")
-        print("Using default configuration")
-        return AppConfig()
+        raise RuntimeError(f"Could not load config from {config_path}: {e}") from e
 
 
 def save_config(config: AppConfig) -> None:

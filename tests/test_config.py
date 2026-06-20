@@ -1,5 +1,7 @@
 """Tests for AppConfig: defaults, serialisation, validation."""
 
+import pytest
+
 from meeting_notes.config import AppConfig, validate_config
 from meeting_notes.ai_models import PROVIDERS, configured_api_key
 
@@ -41,6 +43,18 @@ def test_unknown_keys_in_from_dict_are_ignored():
         }
     )
     assert cfg.ai_provider == "anthropic"
+
+
+def test_load_config_fails_loudly_on_invalid_yaml(tmp_path, monkeypatch):
+    from meeting_notes.config import load_config
+
+    config_dir = tmp_path / "meeting-notes"
+    config_dir.mkdir()
+    (config_dir / "config.yaml").write_text("ai_provider: [", encoding="utf-8")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+
+    with pytest.raises(RuntimeError, match="Could not load config"):
+        load_config()
 
 
 def test_default_provider_is_anthropic():
