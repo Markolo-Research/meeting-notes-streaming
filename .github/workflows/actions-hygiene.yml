@@ -37,7 +37,7 @@ jobs:
           repository: Markolo-Research/markolo-shared
           ref: ${{ env.MARKOLO_SHARED_STANDARDS_REF }}
           path: .repo-standards/markolo-shared
-          token: ${{ secrets.PACKAGES_TOKEN }}
+          token: ${{ secrets.PACKAGES_TOKEN || github.token }}
           persist-credentials: false
 
       - name: Set shared repo standards path
