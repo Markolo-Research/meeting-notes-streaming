@@ -149,9 +149,9 @@ class AudioRecorder:
                 str(system_file),
             ]
             if sink:
-                system_cmd.insert(1, f"--target={sink.sink_id}")
+                system_cmd.insert(1, f"--target={sink[1]}")
         else:
-            parec_device = f"{sink.name}.monitor" if sink else ""
+            parec_device = f"{sink[0]}.monitor" if sink else ""
             parec_cmd_parts = [
                 "parec",
                 "--channels=2",

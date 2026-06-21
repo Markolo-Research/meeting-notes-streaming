@@ -1,7 +1,4 @@
-"""PulseAudio/PipeWire device discovery for recording."""
-
 from collections.abc import Callable
-from dataclasses import dataclass
 import subprocess
 
 from .logger import get_logger
@@ -9,89 +6,66 @@ from .logger import get_logger
 logger = get_logger(__name__)
 
 RunCommand = Callable[..., subprocess.CompletedProcess[str]]
+AudioSink = tuple[str, str]
 
 
-@dataclass(frozen=True)
-class AudioSink:
-    name: str
-    sink_id: str
-
-
-def _run_pactl(args: list[str], run: RunCommand) -> subprocess.CompletedProcess[str]:
-    return run(["pactl", *args], capture_output=True, text=True, timeout=2)
-
-
-def _description_for_device(
-    device_name: str,
-    list_args: list[str],
+def _run_pactl(
+    args: list[str],
     run: RunCommand,
-) -> str | None:
+    failure_message: str,
+) -> str:
     try:
-        result = _run_pactl(list_args, run)
+        result = run(["pactl", *args], capture_output=True, text=True, timeout=2)
     except (OSError, subprocess.SubprocessError) as exc:
-        logger.warning("Could not list audio device descriptions", exc_info=exc)
-        return None
-
+        logger.warning(failure_message, exc_info=exc)
+        return ""
     if result.returncode != 0:
-        return None
+        logger.warning("pactl %s failed: %s", " ".join(args), result.stderr.strip())
+        return ""
+    return result.stdout.strip()
 
-    lines = result.stdout.splitlines()
-    for index, line in enumerate(lines):
-        if device_name not in line:
-            continue
-        for detail in lines[index : index + 20]:
-            if detail.strip().startswith("Description:"):
-                return detail.split("Description:", 1)[1].strip()
+
+def _description_for_device(device_name: str, list_args: list[str], run: RunCommand) -> str | None:
+    if not device_name:
         return None
+    lines = _run_pactl(list_args, run, "Could not list audio device descriptions").splitlines()
+    for index, line in enumerate(lines):
+        if device_name in line:
+            return next(
+                (
+                    detail.split("Description:", 1)[1].strip()
+                    for detail in lines[index : index + 20]
+                    if detail.strip().startswith("Description:")
+                ),
+                None,
+            )
     return None
 
 
 def default_source_description(run: RunCommand = subprocess.run) -> str:
-    try:
-        result = _run_pactl(["get-default-source"], run)
-    except (OSError, subprocess.SubprocessError) as exc:
-        logger.warning("Could not query default audio source", exc_info=exc)
-        return "System default"
-
-    if result.returncode != 0:
-        logger.warning("pactl get-default-source failed: %s", result.stderr.strip())
-        return "System default"
-
-    source_name = result.stdout.strip()
-    description = _description_for_device(source_name, ["list", "sources"], run)
-    return description or source_name or "System default"
+    source_name = _run_pactl(["get-default-source"], run, "Could not query default audio source")
+    return _description_for_device(source_name, ["list", "sources"], run) or source_name or "System default"
 
 
 def default_sink(run: RunCommand = subprocess.run) -> AudioSink | None:
-    try:
-        result = _run_pactl(["get-default-sink"], run)
-    except (OSError, subprocess.SubprocessError) as exc:
-        logger.warning("Could not query default audio sink", exc_info=exc)
-        return None
-
-    if result.returncode != 0:
-        logger.warning("pactl get-default-sink failed: %s", result.stderr.strip())
-        return None
-
-    sink_name = result.stdout.strip()
+    sink_name = _run_pactl(["get-default-sink"], run, "Could not query default audio sink")
     if not sink_name:
         logger.warning("pactl returned an empty default sink name")
         return None
 
-    try:
-        result = _run_pactl(["list", "sinks", "short"], run)
-    except (OSError, subprocess.SubprocessError) as exc:
-        logger.warning("Could not list audio sinks", exc_info=exc)
-        return None
-
-    if result.returncode != 0:
-        logger.warning("pactl list sinks short failed: %s", result.stderr.strip())
-        return None
-
-    for line in result.stdout.splitlines():
-        fields = line.split()
-        if len(fields) >= 2 and fields[1] == sink_name:
-            return AudioSink(name=sink_name, sink_id=fields[0])
+    sink = next(
+        (
+            (sink_name, fields[0])
+            for fields in (
+                line.split()
+                for line in _run_pactl(["list", "sinks", "short"], run, "Could not list audio sinks").splitlines()
+            )
+            if len(fields) >= 2 and fields[1] == sink_name
+        ),
+        None,
+    )
+    if sink is not None:
+        return sink
 
     logger.warning("Default sink %s was not found in pactl sink list", sink_name)
     return None
@@ -101,8 +75,7 @@ def default_sink_description(run: RunCommand = subprocess.run) -> str:
     sink = default_sink(run)
     if sink is None:
         return "System default (monitor)"
-    description = _description_for_device(sink.name, ["list", "sinks"], run)
-    return f"{description or sink.name} (monitor)"
+    return f"{_description_for_device(sink[0], ['list', 'sinks'], run) or sink[0]} (monitor)"
 
 
 def audio_device_info(mode: str, run: RunCommand = subprocess.run) -> dict[str, str]:

@@ -23,8 +23,7 @@ def test_default_sink_uses_name_to_find_sink_id():
     sink = default_sink(fake_run)
 
     assert sink is not None
-    assert sink.name == "alsa_output.pci-0000_00_1f.3.analog-stereo"
-    assert sink.sink_id == "1078"
+    assert sink == ("alsa_output.pci-0000_00_1f.3.analog-stereo", "1078")
 
 
 def test_default_sink_falls_back_when_sink_listing_raises(caplog):
