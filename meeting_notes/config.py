@@ -1,11 +1,11 @@
 """Configuration management for Meeting Notes."""
 
-import os
-import yaml
 from pathlib import Path
 from collections.abc import Mapping
 from typing import Dict, Any, Optional
 from dataclasses import dataclass, asdict
+import os
+import yaml
 
 from .logger import get_logger
 from .ai_models import PROVIDERS

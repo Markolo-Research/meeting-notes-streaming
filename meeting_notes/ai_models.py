@@ -52,11 +52,9 @@ OPENROUTER_MODELS = {
     )
 }
 OPENROUTER_MODELS.update(
-    {
-        "cheap": OPENROUTER_MODELS["gemini-lite"],
-        "balanced": OPENROUTER_MODELS["claude-sonnet"],
-        "premium": OPENROUTER_MODELS["claude-sonnet"],
-    }
+    cheap=OPENROUTER_MODELS["gemini-lite"],
+    balanced=OPENROUTER_MODELS["claude-sonnet"],
+    premium=OPENROUTER_MODELS["claude-sonnet"],
 )
 
 PROVIDERS = {
