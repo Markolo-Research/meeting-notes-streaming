@@ -7,7 +7,7 @@ from typing import Dict, Any, Optional
 from dataclasses import dataclass, asdict
 
 from .logger import get_logger
-from .ai_models import PROVIDERS, configured_api_key
+from .ai_models import PROVIDERS
 
 logger = get_logger(__name__)
 
@@ -18,7 +18,7 @@ class AppConfig:
 
     # AI Summarization
     ai_provider: str = "anthropic"  # "openai", "anthropic", "openrouter", "local", or "none"
-    ai_model: str = "haiku"  # Model tier (varies by provider)
+    ai_model: str = "sonnet"  # Model tier (varies by provider)
 
     # API Keys (or set environment variables)
     openai_api_key: str = ""  # OPENAI_API_KEY
@@ -133,6 +133,16 @@ def save_config(config: AppConfig) -> None:
         raise RuntimeError(f"Failed to save config: {e}")
 
 
+def configured_api_key(config: AppConfig, provider: str) -> str | None:
+    if provider == "openai":
+        return config.openai_api_key or os.getenv("OPENAI_API_KEY")
+    if provider == "anthropic":
+        return config.anthropic_api_key or os.getenv("ANTHROPIC_API_KEY")
+    if provider == "openrouter":
+        return config.openrouter_api_key or os.getenv("OPENROUTER_API_KEY")
+    return None
+
+
 def validate_config(config: AppConfig) -> tuple[bool, Optional[str]]:
     """
     Validate configuration values.
@@ -148,8 +158,7 @@ def validate_config(config: AppConfig) -> tuple[bool, Optional[str]]:
     # Check for API keys based on provider
     provider_spec = PROVIDERS[config.ai_provider]
     if provider_spec.env_var:
-        api_key = configured_api_key(config, config.ai_provider)
-        if not api_key:
+        if not configured_api_key(config, config.ai_provider):
             return False, (
                 f"ai_provider is '{config.ai_provider}' but no API key found.\n"
                 f"Set {provider_spec.env_var} environment variable or {provider_spec.api_key_field} in config"

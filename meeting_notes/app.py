@@ -21,8 +21,7 @@ from textual import work
 from meeting_notes.recorder import AudioRecorder
 from meeting_notes.transcriber import WhisperTranscriber
 from meeting_notes.note_maker import NoteMaker
-from meeting_notes.config import load_config, save_config, AppConfig, validate_config
-from meeting_notes.ai_models import configured_api_key
+from meeting_notes.config import load_config, save_config, AppConfig, validate_config, configured_api_key
 from meeting_notes.settings import SettingsScreen
 from meeting_notes.logger import setup_logging, get_logger
 

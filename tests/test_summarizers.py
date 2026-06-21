@@ -27,11 +27,30 @@ def test_anthropic_sonnet_is_current_4_6():
     assert "4.6" in sonnet["name"]
 
 
+def test_anthropic_opus_is_current_4_8():
+    opus = AnthropicSummarizer.MODELS["opus"]
+    assert opus["id"] == "claude-opus-4-8"
+    assert "4.8" in opus["name"]
+
+
 def test_anthropic_no_deprecated_3_5_ids_remain():
     """Guard against accidental revert to deprecated 3.5 model IDs."""
     for tier, info in AnthropicSummarizer.MODELS.items():
         assert "3-5" not in info["id"], f"{tier} still references deprecated 3.5 model"
         assert "3.5" not in info["name"], f"{tier} still labelled as 3.5"
+
+
+def test_openai_no_deprecated_4o_ids_remain():
+    for tier, info in OpenAISummarizer.MODELS.items():
+        assert "gpt-4" not in info["id"], f"{tier} still references a deprecated GPT-4-class model"
+
+
+def test_openrouter_no_deprecated_model_ids_remain():
+    deprecated_fragments = ("gemini-flash-1.5", "claude-3-haiku", "claude-3.5")
+    for tier, info in OpenRouterSummarizer.MODELS.items():
+        assert not any(fragment in info["id"] for fragment in deprecated_fragments), (
+            f"{tier} still references a deprecated OpenRouter model"
+        )
 
 
 def test_anthropic_models_have_required_fields():

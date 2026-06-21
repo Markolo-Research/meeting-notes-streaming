@@ -219,7 +219,7 @@ class OpenAISummarizer(BaseSummarizer):
 
     MODELS = OPENAI_MODELS
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "mini"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "standard"):
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         if not self.api_key:
             raise ValueError("OpenAI API key required. Set OPENAI_API_KEY environment variable.")
@@ -285,7 +285,7 @@ class AnthropicSummarizer(BaseSummarizer):
 
     MODELS = ANTHROPIC_MODELS
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "haiku"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "sonnet"):
         self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
         if not self.api_key:
             raise ValueError("Anthropic API key required. Set ANTHROPIC_API_KEY environment variable.")
@@ -352,7 +352,7 @@ class OpenRouterSummarizer(BaseSummarizer):
 
     MODELS = OPENROUTER_MODELS
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "balanced"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "claude-sonnet"):
         self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
         if not self.api_key:
             raise ValueError("OpenRouter API key required. Set OPENROUTER_API_KEY environment variable.")

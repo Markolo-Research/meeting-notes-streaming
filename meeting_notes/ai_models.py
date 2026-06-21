@@ -1,11 +1,7 @@
 """Canonical AI provider and model policy."""
 
-import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from meeting_notes.config import AppConfig
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -19,75 +15,58 @@ class ProviderSpec:
 
 
 OPENAI_MODELS = {
-    "mini": {
-        "id": "gpt-4o-mini",
-        "name": "GPT-4o Mini",
-        "description": "~$0.001/meeting - Ultra cheap",
-        "cost_per_1k_input": 0.00015,
-        "cost_per_1k_output": 0.0006,
-    },
-    "standard": {
-        "id": "gpt-4o",
-        "name": "GPT-4o",
-        "description": "~$0.015/meeting - Best quality",
-        "cost_per_1k_input": 0.0025,
-        "cost_per_1k_output": 0.01,
-    },
+    tier: {
+        "id": model_id,
+        "name": name,
+        "description": description,
+        "cost_per_1k_input": input_cost,
+        "cost_per_1k_output": output_cost,
+    }
+    for tier, model_id, name, description, input_cost, output_cost in (
+        ("mini", "gpt-5.4-mini", "GPT-5.4 Mini", "Lower-latency GPT-5.4 option", 0.00075, 0.0045),
+        ("standard", "gpt-5.5", "GPT-5.5", "Frontier OpenAI option", 0.005, 0.03),
+    )
 }
 
 ANTHROPIC_MODELS = {
-    "haiku": {
-        "id": "claude-haiku-4-5-20251001",
-        "name": "Claude Haiku 4.5",
-        "description": "~$0.005/meeting - Fast & affordable",
-        "cost_per_1k_input": 0.0008,
-        "cost_per_1k_output": 0.004,
-    },
-    "sonnet": {
-        "id": "claude-sonnet-4-6",
-        "name": "Claude Sonnet 4.6",
-        "description": "~$0.020/meeting - Best quality",
-        "cost_per_1k_input": 0.003,
-        "cost_per_1k_output": 0.015,
-    },
+    tier: {
+        "id": model_id,
+        "name": name,
+        "description": description,
+        "cost_per_1k_input": input_cost,
+        "cost_per_1k_output": output_cost,
+    }
+    for tier, model_id, name, description, input_cost, output_cost in (
+        ("haiku", "claude-haiku-4-5-20251001", "Claude Haiku 4.5", "Fast Claude option", 0.0008, 0.004),
+        ("sonnet", "claude-sonnet-4-6", "Claude Sonnet 4.6", "Balanced Claude option", 0.003, 0.015),
+        ("opus", "claude-opus-4-8", "Claude Opus 4.8", "Most capable Claude option", 0.005, 0.025),
+    )
 }
 
 OPENROUTER_MODELS = {
-    "cheap": {
-        "id": "google/gemini-flash-1.5",
-        "name": "Gemini 1.5 Flash",
-        "description": "~$0.001/meeting",
-        "cost_per_1k_tokens": 0.000075,
-    },
-    "balanced": {
-        "id": "anthropic/claude-3-haiku",
-        "name": "Claude 3 Haiku",
-        "description": "~$0.01/meeting",
-        "cost_per_1k_tokens": 0.00025,
-    },
-    "premium": {
-        "id": "anthropic/claude-3.5-sonnet",
-        "name": "Claude 3.5 Sonnet",
-        "description": "~$0.03/meeting",
-        "cost_per_1k_tokens": 0.003,
-    },
+    tier: {"id": model_id, "name": name, "description": description, "cost_per_1k_tokens": token_cost}
+    for tier, model_id, name, description, token_cost in (
+        ("gemini-lite", "google/gemini-3.1-flash-lite", "Gemini 3.1 Flash-Lite", "Low-latency Gemini option", 0.0002),
+        ("openai-mini", "openai/gpt-5.4-mini", "GPT-5.4 Mini", "Efficient OpenAI option", 0.0045),
+        ("claude-sonnet", "anthropic/claude-sonnet-4.6", "Claude Sonnet 4.6", "Strong Claude option", 0.015),
+    )
 }
 
 PROVIDERS = {
     "openai": ProviderSpec(
-        label="OpenAI (GPT-4o Mini/4o)",
-        description="Fast, cheap, great quality",
+        label="OpenAI (GPT-5.4 Mini/GPT-5.5)",
+        description="Current OpenAI frontier and efficient GPT-5.4-class models",
         api_key_field="openai_api_key",
         env_var="OPENAI_API_KEY",
-        default_model="mini",
+        default_model="standard",
         models=OPENAI_MODELS,
     ),
     "anthropic": ProviderSpec(
-        label="Anthropic (Claude)",
-        description="Excellent quality, best for action items",
+        label="Anthropic (Claude 4.5/4.6/4.8)",
+        description="Current Claude models for high-quality meeting synthesis",
         api_key_field="anthropic_api_key",
         env_var="ANTHROPIC_API_KEY",
-        default_model="haiku",
+        default_model="sonnet",
         models=ANTHROPIC_MODELS,
     ),
     "openrouter": ProviderSpec(
@@ -95,7 +74,7 @@ PROVIDERS = {
         description="Access to 300+ models",
         api_key_field="openrouter_api_key",
         env_var="OPENROUTER_API_KEY",
-        default_model="balanced",
+        default_model="claude-sonnet",
         models=OPENROUTER_MODELS,
     ),
     "local": ProviderSpec(
@@ -115,13 +94,3 @@ PROVIDERS = {
         models={},
     ),
 }
-
-CLOUD_PROVIDER_IDS = ("openai", "anthropic", "openrouter")
-PROVIDER_IDS = tuple(PROVIDERS)
-
-
-def configured_api_key(config: "AppConfig", provider: str) -> str | None:
-    spec = PROVIDERS[provider]
-    if not spec.api_key_field or not spec.env_var:
-        return None
-    return getattr(config, spec.api_key_field) or os.getenv(spec.env_var)

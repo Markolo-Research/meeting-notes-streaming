@@ -406,7 +406,7 @@ class SettingsScreen(Screen):
 
         # Model selection
         widgets.append(Static("Model", classes="settings-label"))
-        current_model = self.config.get("ai_model", "mini")
+        current_model = self.config.get("ai_model", PROVIDERS["openai"].default_model)
 
         for model_id, model in PROVIDERS["openai"].models.items():
             is_current = model_id == current_model
@@ -442,7 +442,7 @@ class SettingsScreen(Screen):
 
         # Model selection
         widgets.append(Static("Model", classes="settings-label"))
-        current_model = self.config.get("ai_model", "haiku")
+        current_model = self.config.get("ai_model", PROVIDERS["anthropic"].default_model)
 
         for model_id, model in PROVIDERS["anthropic"].models.items():
             is_current = model_id == current_model
@@ -478,7 +478,7 @@ class SettingsScreen(Screen):
 
         # Model selection
         widgets.append(Static("Model Tier", classes="settings-label"))
-        current_model = self.config.get("ai_model", "balanced")
+        current_model = self.config.get("ai_model", PROVIDERS["openrouter"].default_model)
 
         for model_id, model in PROVIDERS["openrouter"].models.items():
             is_current = model_id == current_model
@@ -646,15 +646,12 @@ class SettingsScreen(Screen):
         # Provider selection
         elif button_id and button_id.startswith("provider-"):
             if hasattr(event.button, "provider_id"):
-                self.config["ai_provider"] = event.button.provider_id
+                provider_id = event.button.provider_id
+                self.config["ai_provider"] = provider_id
                 # Set default model for provider
-                if event.button.provider_id == "openai":
-                    self.config["ai_model"] = "mini"
-                elif event.button.provider_id == "anthropic":
-                    self.config["ai_model"] = "haiku"
-                elif event.button.provider_id == "openrouter":
-                    self.config["ai_model"] = "balanced"
-                elif event.button.provider_id == "local":
+                if provider_id in PROVIDERS and PROVIDERS[provider_id].models:
+                    self.config["ai_model"] = PROVIDERS[provider_id].default_model
+                elif provider_id == "local":
                     # `or` fallback so an empty-string ollama_model still
                     # produces a runnable default (dict.get only fills in the
                     # default when the key is missing entirely).

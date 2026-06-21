@@ -2,8 +2,8 @@
 
 import pytest
 
-from meeting_notes.config import AppConfig, validate_config
-from meeting_notes.ai_models import PROVIDERS, configured_api_key
+from meeting_notes.ai_models import PROVIDERS
+from meeting_notes.config import AppConfig, configured_api_key, validate_config
 
 
 def test_default_recording_retention_days():
@@ -61,7 +61,7 @@ def test_default_provider_is_anthropic():
     """Sanity check: the default cloud provider hasn't drifted."""
     cfg = AppConfig()
     assert cfg.ai_provider == "anthropic"
-    assert cfg.ai_model == "haiku"
+    assert cfg.ai_model == "sonnet"
 
 
 def test_validate_rejects_unknown_provider():
@@ -79,7 +79,7 @@ def test_validate_rejects_invalid_anthropic_model():
 
 
 def test_validate_accepts_valid_anthropic_config():
-    cfg = AppConfig(ai_provider="anthropic", ai_model="haiku", anthropic_api_key="sk-ant-test")
+    cfg = AppConfig(ai_provider="anthropic", ai_model="sonnet", anthropic_api_key="sk-ant-test")
     ok, err = validate_config(cfg)
     assert ok, f"expected valid, got error: {err}"
 
