@@ -27,6 +27,18 @@ def test_default_sink_uses_name_to_find_sink_id():
     assert sink.sink_id == "1078"
 
 
+def test_default_sink_falls_back_when_sink_listing_raises(caplog):
+    def fake_run(cmd, **_kwargs):
+        if cmd == ["pactl", "get-default-sink"]:
+            return _completed("alsa_output.speakers\n")
+        if cmd == ["pactl", "list", "sinks", "short"]:
+            raise subprocess.TimeoutExpired(cmd, timeout=2)
+        raise AssertionError(cmd)
+
+    assert default_sink(fake_run) is None
+    assert "Could not list audio sinks" in caplog.text
+
+
 def test_audio_device_info_uses_descriptions_when_available():
     def fake_run(cmd, **_kwargs):
         if cmd == ["pactl", "get-default-source"]:

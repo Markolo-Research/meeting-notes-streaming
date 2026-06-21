@@ -73,7 +73,12 @@ def default_sink(run: RunCommand = subprocess.run) -> AudioSink | None:
         logger.warning("pactl returned an empty default sink name")
         return None
 
-    result = _run_pactl(["list", "sinks", "short"], run)
+    try:
+        result = _run_pactl(["list", "sinks", "short"], run)
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("Could not list audio sinks", exc_info=exc)
+        return None
+
     if result.returncode != 0:
         logger.warning("pactl list sinks short failed: %s", result.stderr.strip())
         return None
