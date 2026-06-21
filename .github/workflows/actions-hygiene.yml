@@ -47,4 +47,9 @@ jobs:
         run: echo "REPO_STANDARDS_LOCAL=$GITHUB_WORKSPACE/.repo-standards/markolo-shared" >> "$GITHUB_ENV"
 
       - name: Run actions hygiene
+        if: ${{ env.PACKAGES_TOKEN != '' }}
         run: scripts/guards/_repo-standards actions-hygiene
+
+      - name: Skip actions hygiene without shared token
+        if: ${{ env.PACKAGES_TOKEN == '' }}
+        run: echo "Skipping actions hygiene because PACKAGES_TOKEN is unavailable."
