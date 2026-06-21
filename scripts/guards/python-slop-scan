@@ -16,6 +16,8 @@ from typing import cast
 ROOT_DIR = Path(__file__).resolve().parents[2]
 BASELINE_PATH = ROOT_DIR / "scripts/guards/python-slop-baseline.json"
 RUFF_RULES = "BLE,C901,PLR0911,PLR0912,PLR0913,PLR0915,FBT001,FBT002"
+
+
 @dataclass(frozen=True)
 class SlopMetrics:
     ruff_strict: dict[str, object]
@@ -32,12 +34,14 @@ class SlopMetrics:
         return payload
 
 
-def run_command(args: list[str], *, stdout_path: Path | None = None) -> subprocess.CompletedProcess[str]:
+def run_command(
+    args: list[str], *, root_dir: Path = ROOT_DIR, stdout_path: Path | None = None
+) -> subprocess.CompletedProcess[str]:
     stdout_handle = stdout_path.open("w", encoding="utf-8") if stdout_path else subprocess.PIPE
     try:
         return subprocess.run(
             args,
-            cwd=ROOT_DIR,
+            cwd=root_dir,
             check=False,
             text=True,
             stdout=stdout_handle,
@@ -48,7 +52,7 @@ def run_command(args: list[str], *, stdout_path: Path | None = None) -> subproce
             stdout_handle.close()
 
 
-def scan_ruff(tmpdir: Path) -> dict[str, object]:
+def scan_ruff(tmpdir: Path, *, root_dir: Path) -> dict[str, object]:
     output_path = tmpdir / "ruff-strict.json"
     result = run_command(
         [
@@ -63,6 +67,7 @@ def scan_ruff(tmpdir: Path) -> dict[str, object]:
             "json",
             ".",
         ],
+        root_dir=root_dir,
         stdout_path=output_path,
     )
     if result.returncode != 0:
@@ -74,10 +79,10 @@ def scan_ruff(tmpdir: Path) -> dict[str, object]:
     return {"total": sum(by_rule.values()), "by_rule": dict(sorted(by_rule.items()))}
 
 
-def tracked_python_paths() -> list[str]:
+def tracked_python_paths(*, root_dir: Path) -> list[str]:
     result = subprocess.run(
         ["git", "ls-files", "*.py"],
-        cwd=ROOT_DIR,
+        cwd=root_dir,
         check=False,
         capture_output=True,
         text=True,
@@ -88,10 +93,10 @@ def tracked_python_paths() -> list[str]:
     return [line for line in result.stdout.splitlines() if line.strip()]
 
 
-def has_vulture_config() -> bool:
+def has_vulture_config(*, root_dir: Path) -> bool:
     import tomllib
 
-    pyproject_path = ROOT_DIR / "pyproject.toml"
+    pyproject_path = root_dir / "pyproject.toml"
     if not pyproject_path.exists():
         return False
     with pyproject_path.open("rb") as handle:
@@ -100,15 +105,15 @@ def has_vulture_config() -> bool:
     return isinstance(tool_config, dict) and "vulture" in tool_config
 
 
-def scan_vulture(tmpdir: Path) -> dict[str, int]:
+def scan_vulture(tmpdir: Path, *, root_dir: Path) -> dict[str, int]:
     output_path = tmpdir / "vulture.txt"
     args = ["uv", "run", "--with", "vulture==2.14", "vulture"]
-    if not has_vulture_config():
-        paths = tracked_python_paths()
+    if not has_vulture_config(root_dir=root_dir):
+        paths = tracked_python_paths(root_dir=root_dir)
         if not paths:
             return {"total": 0}
         args.extend(paths)
-    result = run_command(args, stdout_path=output_path)
+    result = run_command(args, root_dir=root_dir, stdout_path=output_path)
     if result.returncode not in {0, 3}:
         sys.stderr.write(result.stderr)
         raise SystemExit(result.returncode)
@@ -116,14 +121,14 @@ def scan_vulture(tmpdir: Path) -> dict[str, int]:
     return {"total": total}
 
 
-def prepare_jscpd_tree(tmpdir: Path) -> Path | None:
-    tracked_paths = tracked_python_paths()
+def prepare_jscpd_tree(tmpdir: Path, *, root_dir: Path) -> Path | None:
+    tracked_paths = tracked_python_paths(root_dir=root_dir)
     if not tracked_paths:
         return None
 
     source_dir = tmpdir / "jscpd-source"
     for relative_path in tracked_paths:
-        source_path = ROOT_DIR / relative_path
+        source_path = root_dir / relative_path
         if not source_path.is_file():
             continue
         target_path = source_dir / relative_path
@@ -132,8 +137,8 @@ def prepare_jscpd_tree(tmpdir: Path) -> Path | None:
     return source_dir
 
 
-def scan_jscpd(tmpdir: Path) -> dict[str, int | float]:
-    source_dir = prepare_jscpd_tree(tmpdir)
+def scan_jscpd(tmpdir: Path, *, root_dir: Path) -> dict[str, int | float]:
+    source_dir = prepare_jscpd_tree(tmpdir, root_dir=root_dir)
     if source_dir is None:
         return {"duplicates": 0, "duplicated_lines": 0, "percentage": 0.0}
 
@@ -176,13 +181,13 @@ def scan_jscpd(tmpdir: Path) -> dict[str, int | float]:
     }
 
 
-def collect_metrics(*, include_duplication: bool) -> dict[str, object]:
+def collect_metrics(*, include_duplication: bool, root_dir: Path = ROOT_DIR) -> dict[str, object]:
     with tempfile.TemporaryDirectory() as tmp:
         tmpdir = Path(tmp)
         metrics = SlopMetrics(
-            ruff_strict=scan_ruff(tmpdir),
-            vulture=scan_vulture(tmpdir),
-            jscpd=scan_jscpd(tmpdir) if include_duplication else None,
+            ruff_strict=scan_ruff(tmpdir, root_dir=root_dir),
+            vulture=scan_vulture(tmpdir, root_dir=root_dir),
+            jscpd=scan_jscpd(tmpdir, root_dir=root_dir) if include_duplication else None,
         )
         return metrics.to_json_dict()
 
@@ -260,15 +265,66 @@ def preserve_duplication_baseline(baseline: dict[str, object], current: dict[str
         current["jscpd"] = baseline["jscpd"]
 
 
+def ref_exists(ref: str) -> bool:
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+        cwd=ROOT_DIR,
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return result.returncode == 0
+
+
+def default_base_ref() -> str | None:
+    candidates = [os.getenv("PYTHON_SLOP_SCAN_BASE_REF")]
+    if github_base := os.getenv("GITHUB_BASE_REF"):
+        candidates.extend([f"origin/{github_base}", github_base])
+    candidates.extend(["origin/main", "main"])
+    return next((ref for ref in candidates if ref and ref_exists(ref)), None)
+
+
+def non_test_python_loc(root_dir: Path) -> int:
+    total = 0
+    for relative_path in tracked_python_paths(root_dir=root_dir):
+        path = Path(relative_path)
+        if "tests" in path.parts or path.name.startswith("test_"):
+            continue
+        total += len((root_dir / relative_path).read_text(encoding="utf-8").splitlines())
+    return total
+
+
+def collect_base_metrics(ref: str, *, include_duplication: bool) -> tuple[dict[str, object], int]:
+    with tempfile.TemporaryDirectory() as tmp:
+        worktree_path = Path(tmp) / "base"
+        result = subprocess.run(
+            ["git", "worktree", "add", "--detach", "--quiet", str(worktree_path), ref],
+            cwd=ROOT_DIR,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            sys.stderr.write(result.stderr)
+            raise SystemExit(result.returncode)
+        metrics = collect_metrics(include_duplication=include_duplication, root_dir=worktree_path)
+        return metrics, non_test_python_loc(worktree_path)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run Python maintainability ratchet checks.")
     parser.add_argument("--update-baseline", action="store_true", help="Replace the committed slop-scan baseline with current metrics.")
+    parser.add_argument(
+        "--base-ref",
+        help="Compare against this git ref to fail only newly introduced slop. Defaults to PR base, push before SHA, or origin/main.",
+    )
     args = parser.parse_args()
 
     baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8")) if BASELINE_PATH.exists() else {}
     include_duplication = should_scan_duplication()
     require_runtime_tools(include_duplication=include_duplication)
     current = collect_metrics(include_duplication=include_duplication)
+    current_non_test_loc = non_test_python_loc(ROOT_DIR)
     if args.update_baseline:
         preserve_duplication_baseline(baseline, current)
     current_json = json.dumps(current, indent=2, sort_keys=True) + "\n"
@@ -279,10 +335,28 @@ def main() -> None:
         print(current_json, end="")
         return
 
-    failures = ratchet_failures(baseline, current)
+    base_ref = args.base_ref or default_base_ref()
+    base_result = collect_base_metrics(base_ref, include_duplication=include_duplication) if base_ref else None
+    base_metrics = base_result[0] if base_result else None
+    base_non_test_loc = base_result[1] if base_result else None
+    baseline_failures = ratchet_failures(baseline, current)
+    failures = ratchet_failures(base_metrics, current) if base_metrics else baseline_failures
+    if base_non_test_loc is not None and current_non_test_loc > base_non_test_loc:
+        failures.append(f"non-test Python LOC increased: {current_non_test_loc} > {base_non_test_loc}")
+
     print(current_json, end="")
+    print(f"Non-test Python LOC: {current_non_test_loc}")
+    if base_metrics:
+        print(f"Compared current metrics against base ref {base_ref}.")
+        print(f"Base non-test Python LOC: {base_non_test_loc}")
+        baseline_gap = ratchet_failures(baseline, base_metrics)
+        if baseline_gap:
+            print("Committed baseline is below base-ref metrics; existing debt remains visible:")
+            for failure in baseline_gap:
+                print(f"- {failure}")
     if failures:
-        print("Python slop-scan ratchet failed:", file=sys.stderr)
+        target = f"base ref {base_ref}" if base_metrics else "committed baseline"
+        print(f"Python slop-scan ratchet failed against {target}:", file=sys.stderr)
         for failure in failures:
             print(f"- {failure}", file=sys.stderr)
         raise SystemExit(1)

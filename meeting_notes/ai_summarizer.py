@@ -6,6 +6,7 @@ import os
 import time
 
 from .logger import get_logger
+from .ai_models import ANTHROPIC_MODELS, OPENAI_MODELS, OPENROUTER_MODELS
 
 logger = get_logger(__name__)
 
@@ -216,22 +217,9 @@ PARTICIPANTS:
 class OpenAISummarizer(BaseSummarizer):
     """Summarizer using OpenAI API."""
 
-    MODELS = {
-        "mini": {
-            "id": "gpt-4o-mini",
-            "name": "GPT-4o Mini",
-            "cost_per_1k_input": 0.00015,
-            "cost_per_1k_output": 0.0006,
-        },
-        "standard": {
-            "id": "gpt-4o",
-            "name": "GPT-4o",
-            "cost_per_1k_input": 0.0025,
-            "cost_per_1k_output": 0.01,
-        },
-    }
+    MODELS = OPENAI_MODELS
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "mini"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "standard"):
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         if not self.api_key:
             raise ValueError("OpenAI API key required. Set OPENAI_API_KEY environment variable.")
@@ -295,22 +283,9 @@ class OpenAISummarizer(BaseSummarizer):
 class AnthropicSummarizer(BaseSummarizer):
     """Summarizer using Anthropic API."""
 
-    MODELS = {
-        "haiku": {
-            "id": "claude-haiku-4-5-20251001",
-            "name": "Claude Haiku 4.5",
-            "cost_per_1k_input": 0.0008,
-            "cost_per_1k_output": 0.004,
-        },
-        "sonnet": {
-            "id": "claude-sonnet-4-6",
-            "name": "Claude Sonnet 4.6",
-            "cost_per_1k_input": 0.003,
-            "cost_per_1k_output": 0.015,
-        },
-    }
+    MODELS = ANTHROPIC_MODELS
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "haiku"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "sonnet"):
         self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
         if not self.api_key:
             raise ValueError("Anthropic API key required. Set ANTHROPIC_API_KEY environment variable.")
@@ -375,25 +350,9 @@ class AnthropicSummarizer(BaseSummarizer):
 class OpenRouterSummarizer(BaseSummarizer):
     """Summarizer using OpenRouter API (access to 300+ models)."""
 
-    MODELS = {
-        "cheap": {
-            "id": "google/gemini-flash-1.5",
-            "name": "Gemini 1.5 Flash",
-            "cost_per_1k_tokens": 0.000075,
-        },
-        "balanced": {
-            "id": "anthropic/claude-3-haiku",
-            "name": "Claude 3 Haiku",
-            "cost_per_1k_tokens": 0.00025,
-        },
-        "premium": {
-            "id": "anthropic/claude-3.5-sonnet",
-            "name": "Claude 3.5 Sonnet",
-            "cost_per_1k_tokens": 0.003,
-        },
-    }
+    MODELS = OPENROUTER_MODELS
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "balanced"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "claude-sonnet"):
         self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
         if not self.api_key:
             raise ValueError("OpenRouter API key required. Set OPENROUTER_API_KEY environment variable.")

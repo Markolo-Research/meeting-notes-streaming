@@ -21,7 +21,7 @@ from textual import work
 from meeting_notes.recorder import AudioRecorder
 from meeting_notes.transcriber import WhisperTranscriber
 from meeting_notes.note_maker import NoteMaker
-from meeting_notes.config import load_config, save_config, AppConfig, validate_config
+from meeting_notes.config import load_config, save_config, AppConfig, validate_config, configured_api_key
 from meeting_notes.settings import SettingsScreen
 from meeting_notes.logger import setup_logging, get_logger
 
@@ -694,21 +694,12 @@ class MeetingNotesApp(App):
         self.recorder: Optional[AudioRecorder] = None
         self.transcriber = WhisperTranscriber(self.config.whisper_model)
 
-        # Get appropriate API key based on provider (check config first, then env vars)
-        api_key = None
-        if self.config.ai_provider == "openai":
-            api_key = self.config.openai_api_key or os.getenv("OPENAI_API_KEY")
-        elif self.config.ai_provider == "anthropic":
-            api_key = self.config.anthropic_api_key or os.getenv("ANTHROPIC_API_KEY")
-        elif self.config.ai_provider == "openrouter":
-            api_key = self.config.openrouter_api_key or os.getenv("OPENROUTER_API_KEY")
-
         self.note_maker = NoteMaker(
             output_dir=self.config.notes_dir,
             transcripts_dir=self.config.transcripts_dir,
             ai_provider=self.config.ai_provider,
             ai_model=self.config.ai_model,
-            api_key=api_key,
+            api_key=configured_api_key(self.config, self.config.ai_provider),
         )
         self.notes_dir = Path(self.config.notes_dir).expanduser()
         self.notes_dir.mkdir(parents=True, exist_ok=True)
@@ -1579,21 +1570,12 @@ class MeetingNotesApp(App):
             # Reinitialize components with new config
             self.transcriber = WhisperTranscriber(self.config.whisper_model)
 
-            # Get appropriate API key based on provider (check config first, then env vars)
-            api_key = None
-            if self.config.ai_provider == "openai":
-                api_key = self.config.openai_api_key or os.getenv("OPENAI_API_KEY")
-            elif self.config.ai_provider == "anthropic":
-                api_key = self.config.anthropic_api_key or os.getenv("ANTHROPIC_API_KEY")
-            elif self.config.ai_provider == "openrouter":
-                api_key = self.config.openrouter_api_key or os.getenv("OPENROUTER_API_KEY")
-
             self.note_maker = NoteMaker(
                 output_dir=self.config.notes_dir,
                 transcripts_dir=self.config.transcripts_dir,
                 ai_provider=self.config.ai_provider,
                 ai_model=self.config.ai_model,
-                api_key=api_key,
+                api_key=configured_api_key(self.config, self.config.ai_provider),
             )
             self.notes_dir = Path(self.config.notes_dir).expanduser()
             self.notes_dir.mkdir(parents=True, exist_ok=True)
