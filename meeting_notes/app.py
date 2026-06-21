@@ -689,6 +689,8 @@ class MeetingNotesApp(App):
         if not valid:
             print(f"Warning: Config validation failed: {error}")
             print("Using default values for invalid settings")
+            self.config.ai_provider = "none"
+            self.config.ai_model = ""
 
         # Initialize components with config values
         self.recorder: Optional[AudioRecorder] = None

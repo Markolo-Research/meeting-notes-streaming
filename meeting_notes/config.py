@@ -3,6 +3,7 @@
 import os
 import yaml
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Dict, Any, Optional
 from dataclasses import dataclass, asdict
 
@@ -63,6 +64,8 @@ class AppConfig:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "AppConfig":
         """Create config from dictionary."""
+        if not isinstance(data, Mapping):
+            raise TypeError(f"Config data must be a mapping, got {type(data).__name__}")
         # Filter out any unknown keys
         valid_keys = {field for field in cls.__dataclass_fields__}
         filtered_data = {k: v for k, v in data.items() if k in valid_keys}

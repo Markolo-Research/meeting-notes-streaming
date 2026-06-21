@@ -280,6 +280,8 @@ def default_base_ref() -> str | None:
     candidates = [os.getenv("PYTHON_SLOP_SCAN_BASE_REF")]
     if github_base := os.getenv("GITHUB_BASE_REF"):
         candidates.extend([f"origin/{github_base}", github_base])
+    if github_before := os.getenv("GITHUB_EVENT_BEFORE"):
+        candidates.append(github_before)
     candidates.extend(["origin/main", "main"])
     return next((ref for ref in candidates if ref and ref_exists(ref)), None)
 

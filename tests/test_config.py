@@ -57,6 +57,18 @@ def test_load_config_fails_loudly_on_invalid_yaml(tmp_path, monkeypatch):
         load_config()
 
 
+def test_load_config_fails_loudly_on_non_mapping_yaml(tmp_path, monkeypatch):
+    from meeting_notes.config import load_config
+
+    config_dir = tmp_path / "meeting-notes"
+    config_dir.mkdir()
+    (config_dir / "config.yaml").write_text("- ai_provider\n- anthropic\n", encoding="utf-8")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+
+    with pytest.raises(RuntimeError, match="Config data must be a mapping"):
+        load_config()
+
+
 def test_default_provider_is_anthropic():
     """Sanity check: the default cloud provider hasn't drifted."""
     cfg = AppConfig()
@@ -105,6 +117,13 @@ def test_validate_none_provider_is_always_valid():
     cfg = AppConfig(ai_provider="none")
     ok, err = validate_config(cfg)
     assert ok, err
+
+
+def test_validate_accepts_legacy_openrouter_aliases():
+    for legacy_model in ("cheap", "balanced", "premium"):
+        cfg = AppConfig(ai_provider="openrouter", ai_model=legacy_model, openrouter_api_key="sk-or-test")
+        ok, err = validate_config(cfg)
+        assert ok, err
 
 
 def test_to_safe_dict_redacts_keys():

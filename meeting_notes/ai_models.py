@@ -51,6 +51,13 @@ OPENROUTER_MODELS = {
         ("claude-sonnet", "anthropic/claude-sonnet-4.6", "Claude Sonnet 4.6", "Strong Claude option", 0.015),
     )
 }
+OPENROUTER_MODELS.update(
+    {
+        "cheap": OPENROUTER_MODELS["gemini-lite"],
+        "balanced": OPENROUTER_MODELS["claude-sonnet"],
+        "premium": OPENROUTER_MODELS["claude-sonnet"],
+    }
+)
 
 PROVIDERS = {
     "openai": ProviderSpec(

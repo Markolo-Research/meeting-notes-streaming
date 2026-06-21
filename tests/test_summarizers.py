@@ -72,6 +72,11 @@ def test_openrouter_models_have_required_fields():
             assert field in info, f"OpenRouter {tier} missing {field}"
 
 
+def test_openrouter_legacy_tier_aliases_remain_supported():
+    for tier in ("cheap", "balanced", "premium"):
+        assert tier in OpenRouterSummarizer.MODELS
+
+
 def test_anthropic_summarizer_requires_api_key(monkeypatch):
     """Without an API key (and no env var), construction should fail clearly."""
     import pytest
