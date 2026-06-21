@@ -26,7 +26,12 @@ def _description_for_device(
     list_args: list[str],
     run: RunCommand,
 ) -> str | None:
-    result = _run_pactl(list_args, run)
+    try:
+        result = _run_pactl(list_args, run)
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("Could not list audio device descriptions", exc_info=exc)
+        return None
+
     if result.returncode != 0:
         return None
 

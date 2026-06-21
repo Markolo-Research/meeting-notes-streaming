@@ -60,6 +60,26 @@ def test_audio_device_info_uses_descriptions_when_available():
     }
 
 
+def test_audio_device_info_falls_back_when_description_listing_raises(caplog):
+    def fake_run(cmd, **_kwargs):
+        if cmd == ["pactl", "get-default-source"]:
+            return _completed("alsa_input.usb-mic\n")
+        if cmd == ["pactl", "get-default-sink"]:
+            return _completed("alsa_output.speakers\n")
+        if cmd == ["pactl", "list", "sinks", "short"]:
+            return _completed("42 alsa_output.speakers PipeWire s16le 2ch 48000Hz\n")
+        if cmd == ["pactl", "list", "sources"] or cmd == ["pactl", "list", "sinks"]:
+            raise subprocess.TimeoutExpired(cmd, timeout=2)
+        raise AssertionError(cmd)
+
+    assert audio_device_info("combined", fake_run) == {
+        "mode": "combined",
+        "mic_device": "alsa_input.usb-mic",
+        "system_device": "alsa_output.speakers (monitor)",
+    }
+    assert "Could not list audio device descriptions" in caplog.text
+
+
 def test_audio_device_info_falls_back_loudly_when_pactl_fails(caplog):
     def fake_run(_cmd, **_kwargs):
         return _completed(returncode=1, stderr="no server")
