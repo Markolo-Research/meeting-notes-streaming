@@ -131,9 +131,9 @@ def test_to_safe_dict_redacts_keys():
     cfg = AppConfig(
         anthropic_api_key="sk-ant-supersecretkey12345",
         openai_api_key="sk-openaikey9876543210",
-        openrouter_api_key="orkey1234567890",
+        openrouter_api_key="openrouter-redact-me",
     )
     safe = cfg.to_safe_dict()
     assert "supersecretkey" not in safe["anthropic_api_key"]
     assert "openaikey" not in safe["openai_api_key"]
-    assert "1234567890" not in safe["openrouter_api_key"]
+    assert "redact-me" not in safe["openrouter_api_key"]
