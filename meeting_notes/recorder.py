@@ -1,13 +1,13 @@
 """Audio recording module using PulseAudio/PipeWire via pactl."""
 
 import subprocess
-import os
 import signal
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List
 
+from .audio_devices import audio_device_info, default_sink
 from .logger import get_logger
 
 logger = get_logger(__name__)
@@ -37,8 +37,8 @@ class AudioRecorder:
         self.system_process: Optional[subprocess.Popen] = None
         self.temp_files: List[Path] = []
 
-        # Cache default sink ID for system audio recording
-        self._default_sink_id: Optional[str] = None
+        # Cache default sink discovery for combined recording
+        self._default_sink = None
 
     def start_recording(self, filename: Optional[str] = None) -> str:
         """Start recording audio to a WAV file.
@@ -138,20 +138,20 @@ class AudioRecorder:
         self.mic_process = subprocess.Popen(mic_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         # Start system audio recording
-        # Get default sink ID and record from it (pw-record interprets sink as sink.monitor)
-        default_sink = self._get_default_sink_id()
+        # pw-record accepts a sink id; parec needs the sink monitor name.
+        sink = self._get_default_sink()
         if shutil.which("pw-record"):
             system_cmd = [
                 "pw-record",
-                f"--target={default_sink}",  # Use sink ID, pw-record uses its monitor
                 "--channels=2",
                 "--format=s16",
                 "--rate=48000",
                 str(system_file),
             ]
+            if sink:
+                system_cmd.insert(1, f"--target={sink.sink_id}")
         else:
-            # For parec, append .monitor to sink name if we have one
-            parec_device = f"{default_sink}.monitor" if default_sink else ""
+            parec_device = f"{sink.name}.monitor" if sink else ""
             parec_cmd_parts = [
                 "parec",
                 "--channels=2",
@@ -301,100 +301,12 @@ class AudioRecorder:
         - 'mic_device': Name of microphone device (if applicable)
         - 'system_device': Name of system audio device (if applicable)
         """
-        info = {"mode": self.mode}
+        return audio_device_info(self.mode)
 
-        try:
-            # Get default source (microphone)
-            if self.mode in ["mic", "combined"]:
-                result = subprocess.run(["pactl", "get-default-source"], capture_output=True, text=True, timeout=2)
-                if result.returncode == 0:
-                    source_name = result.stdout.strip()
-                    # Get human-readable description
-                    result = subprocess.run(["pactl", "list", "sources"], capture_output=True, text=True, timeout=2)
-                    # Parse pactl output for the device description
-                    lines = result.stdout.split("\n")
-                    for i, line in enumerate(lines):
-                        if source_name in line:
-                            # Look for Description: line nearby
-                            for j in range(i, min(i + 20, len(lines))):
-                                if lines[j].strip().startswith("Description:"):
-                                    desc = lines[j].split("Description:", 1)[1].strip()
-                                    info["mic_device"] = desc
-                                    break
-                            break
-                    # Fallback to device name if no description found
-                    if "mic_device" not in info:
-                        info["mic_device"] = source_name
-                else:
-                    info["mic_device"] = "System default"
-
-            # Get default sink (system audio output)
-            if self.mode in ["system", "combined"]:
-                result = subprocess.run(["pactl", "get-default-sink"], capture_output=True, text=True, timeout=2)
-                if result.returncode == 0:
-                    sink_name = result.stdout.strip()
-                    # Get human-readable description
-                    result = subprocess.run(["pactl", "list", "sinks"], capture_output=True, text=True, timeout=2)
-                    # Parse pactl output for the device description
-                    lines = result.stdout.split("\n")
-                    for i, line in enumerate(lines):
-                        if sink_name in line:
-                            # Look for Description: line nearby
-                            for j in range(i, min(i + 20, len(lines))):
-                                if lines[j].strip().startswith("Description:"):
-                                    desc = lines[j].split("Description:", 1)[1].strip()
-                                    info["system_device"] = f"{desc} (monitor)"
-                                    break
-                            break
-                    # Fallback to device name if no description found
-                    if "system_device" not in info:
-                        info["system_device"] = f"{sink_name} (monitor)"
-                else:
-                    info["system_device"] = "System default (monitor)"
-
-        except Exception as e:
-            logger.debug(f"Error getting audio device info: {e}")
-            # Set fallback values
-            if self.mode in ["mic", "combined"]:
-                info["mic_device"] = "System default"
-            if self.mode in ["system", "combined"]:
-                info["system_device"] = "System default (monitor)"
-
-        return info
-
-    def _get_default_sink_id(self) -> str:
-        """Get the default sink ID for recording system audio.
-
-        Returns the sink ID (e.g., "1078") which pw-record will use as a monitor source.
-        Falls back to hardcoded name if detection fails.
-        """
-        # Use cached value if available
-        if self._default_sink_id:
-            return self._default_sink_id
-
-        try:
-            # Use pactl to get default sink name
-            result = subprocess.run(["pactl", "get-default-sink"], capture_output=True, text=True, timeout=2)
-
-            if result.returncode == 0:
-                sink_name = result.stdout.strip()
-
-                # Get sink ID from name
-                result = subprocess.run(["pactl", "list", "sinks", "short"], capture_output=True, text=True, timeout=2)
-
-                for line in result.stdout.split("\n"):
-                    if sink_name in line:
-                        # Line format: "ID NAME DRIVER FORMAT"
-                        sink_id = line.split()[0]
-                        print(f"Found default sink: {sink_name} (ID: {sink_id})")
-                        self._default_sink_id = sink_id
-                        return sink_id
-        except Exception as e:
-            print(f"Error getting default sink: {e}")
-
-        # Fallback to empty string = use system default
-        print("Warning: Could not detect default sink, using system default")
-        return ""
+    def _get_default_sink(self):
+        if self._default_sink is None:
+            self._default_sink = default_sink()
+        return self._default_sink
 
 
 if __name__ == "__main__":
