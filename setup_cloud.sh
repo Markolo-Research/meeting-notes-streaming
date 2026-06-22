@@ -241,11 +241,5 @@ echo "3. Enjoy fast AI summaries! ⚡"
 echo
 echo "Note: You can change models or providers anytime in settings (press ',')"
 echo
-echo "1. Start recording meetings:"
-echo "   uv run meeting-notes"
-echo
-echo "2. Press 'r' to start, 's' to stop"
-echo
-echo "3. Enjoy fast AI summaries! ⚡"
 echo
 echo "Tip: Check out OPENROUTER_SETUP.md for more details"

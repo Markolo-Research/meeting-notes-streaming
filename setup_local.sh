@@ -10,7 +10,7 @@ echo ""
 if ! command -v uv &> /dev/null; then
     echo "❌ uv not found. Install uv first:"
     echo "   https://docs.astral.sh/uv/getting-started/installation/"
-    exit 0
+    exit 1
 fi
 
 # Check system dependencies
