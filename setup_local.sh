@@ -7,20 +7,11 @@ echo "🎙️  Meeting Notes AI - Setup"
 echo "=============================="
 echo ""
 
-# Check if running in virtual environment
-if [ -z "$VIRTUAL_ENV" ]; then
-    echo "📦 Creating virtual environment..."
-    python -m venv venv
-    echo "✅ Virtual environment created"
-    echo ""
-    echo "⚠️  Please activate the virtual environment and run this script again:"
-    echo "   source venv/bin/activate"
-    echo "   ./setup.sh"
+if ! command -v uv &> /dev/null; then
+    echo "❌ uv not found. Install uv first:"
+    echo "   https://docs.astral.sh/uv/getting-started/installation/"
     exit 0
 fi
-
-echo "✅ Virtual environment detected: $VIRTUAL_ENV"
-echo ""
 
 # Check system dependencies
 echo "🔍 Checking system dependencies..."
@@ -42,14 +33,13 @@ echo ""
 
 # Install Python dependencies
 echo "📥 Installing Python dependencies..."
-pip install --upgrade pip
-pip install -r requirements.txt
+uv sync
 
 echo ""
 echo "✅ Setup complete!"
 echo ""
 echo "🚀 To run the application:"
-echo "   python run.py"
+echo "   uv run meeting-notes"
 echo ""
 echo "📚 Read README.md for usage instructions"
 echo ""
