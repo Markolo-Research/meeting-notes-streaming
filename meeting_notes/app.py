@@ -8,7 +8,6 @@ import os
 import multiprocessing.resource_tracker
 import shutil
 from pathlib import Path
-from datetime import datetime, timedelta
 from typing import Optional
 
 from textual.app import App, ComposeResult
@@ -23,6 +22,7 @@ from meeting_notes.recorder import AudioRecorder
 from meeting_notes.transcriber import WhisperTranscriber
 from meeting_notes.note_maker import NoteMaker
 from meeting_notes.config import load_config, save_config, AppConfig, validate_config, configured_api_key
+from meeting_notes.recording_retention import cleanup_old_recordings
 from meeting_notes.settings import SettingsScreen
 from meeting_notes.logger import setup_logging, get_logger
 
@@ -727,29 +727,7 @@ class MeetingNotesApp(App):
         self.recording_start_time = None
         self.all_note_paths = []  # Store all note paths for filtering
 
-        # Clean up old recordings on startup
-        self._cleanup_old_recordings()
-
-    def _cleanup_old_recordings(self) -> None:
-        """Delete .wav recordings older than recording_retention_days.
-
-        No-op if retention_days <= 0 or the recordings dir doesn't exist.
-        Errors are logged but not raised — cleanup is best-effort.
-        """
-        retention_days = getattr(self.config, "recording_retention_days", 0)
-        if retention_days <= 0:
-            return
-        recordings_dir = Path(self.config.recordings_dir).expanduser()
-        if not recordings_dir.is_dir():
-            return
-        cutoff = datetime.now() - timedelta(days=retention_days)
-        for wav_file in recordings_dir.glob("*.wav"):
-            try:
-                if datetime.fromtimestamp(wav_file.stat().st_mtime) < cutoff:
-                    logger.info(f"Removing old recording: {wav_file.name} (older than {retention_days} days)")
-                    wav_file.unlink()
-            except Exception as e:
-                logger.warning(f"Failed to remove {wav_file.name}: {e}")
+        cleanup_old_recordings(Path(self.config.recordings_dir).expanduser(), self.config.recording_retention_days)
 
     def compose(self) -> ComposeResult:
         """Build the UI."""
