@@ -2,32 +2,22 @@
 
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Any, Optional
 from collections import Counter
 import re
 
+from .ai_models import PROVIDERS
+from .ai_summarizer import AnthropicSummarizer, OpenAISummarizer, OpenRouterSummarizer
 from .logger import get_logger
+from .summarizer import OllamaSummarizer
 
 logger = get_logger(__name__)
 
-try:
-    from .summarizer import OllamaSummarizer
-
-    OLLAMA_AVAILABLE = True
-except ImportError:
-    OLLAMA_AVAILABLE = False
-
-if TYPE_CHECKING:
-    from .ai_summarizer import MeetingSummary
-else:
-    MeetingSummary = Any
-
-try:
-    from .ai_summarizer import OpenAISummarizer, AnthropicSummarizer, OpenRouterSummarizer
-
-    CLOUD_AVAILABLE = True
-except ImportError:
-    CLOUD_AVAILABLE = False
+CLOUD_SUMMARIZERS = {
+    "openai": OpenAISummarizer,
+    "anthropic": AnthropicSummarizer,
+    "openrouter": OpenRouterSummarizer,
+}
 
 
 class NoteMaker:
@@ -59,58 +49,32 @@ class NoteMaker:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.transcripts_dir.mkdir(parents=True, exist_ok=True)
         self.ai_provider = ai_provider
-        self.summarizer: Optional[Any] = None
+        self.summarizer = self._create_summarizer(ai_provider, ai_model, api_key)
 
-        if ai_provider in ["openai", "anthropic", "openrouter"]:
-            if not CLOUD_AVAILABLE:
-                logger.warning("Cloud AI packages not installed")
-                print(f"Warning: Cloud AI packages not installed. Run: pip install openai anthropic openrouter")
-                print("Disabling AI summarization")
-                self.ai_provider = "none"
-            else:
-                try:
-                    from .ai_summarizer import OpenAISummarizer, AnthropicSummarizer, OpenRouterSummarizer
+        if self.summarizer is not None:
+            label = self._summarizer_label(ai_provider, self.summarizer)
+            logger.info(f"AI summarization enabled ({label})")
+            print(f"AI summarization enabled ({label})")
 
-                    if ai_provider == "openai":
-                        self.summarizer = OpenAISummarizer(api_key=api_key, model=ai_model)
-                        model_name = OpenAISummarizer.MODELS[ai_model]["name"]
-                        logger.info(f"AI summarization enabled (OpenAI: {model_name})")
-                        print(f"AI summarization enabled (OpenAI: {model_name})")
-                    elif ai_provider == "anthropic":
-                        self.summarizer = AnthropicSummarizer(api_key=api_key, model=ai_model)
-                        model_name = AnthropicSummarizer.MODELS[ai_model]["name"]
-                        logger.info(f"AI summarization enabled (Anthropic: {model_name})")
-                        print(f"AI summarization enabled (Anthropic: {model_name})")
-                    elif ai_provider == "openrouter":
-                        self.summarizer = OpenRouterSummarizer(api_key=api_key, model=ai_model)
-                        model_name = OpenRouterSummarizer.MODELS[ai_model]["name"]
-                        logger.info(f"AI summarization enabled (OpenRouter: {model_name})")
-                        print(f"AI summarization enabled (OpenRouter: {model_name})")
+    @staticmethod
+    def _create_summarizer(ai_provider: str, ai_model: str, api_key: str | None) -> Any | None:
+        if ai_provider == "none":
+            return None
+        if ai_provider == "local":
+            return OllamaSummarizer(model=ai_model or PROVIDERS["local"].default_model)
 
-                except Exception as e:
-                    logger.error(f"Could not initialize cloud AI: {e}", exc_info=True)
-                    print(f"Warning: Could not initialize cloud AI: {e}")
-                    self.ai_provider = "none"
+        summarizer_cls = CLOUD_SUMMARIZERS.get(ai_provider)
+        if summarizer_cls is None:
+            raise ValueError(f"Invalid ai_provider: {ai_provider}. Must be one of {list(PROVIDERS)}")
+        return summarizer_cls(api_key=api_key, model=ai_model)
 
-        elif ai_provider == "local":
-            if not OLLAMA_AVAILABLE:
-                logger.warning("Ollama not available")
-                print("Warning: Ollama not available")
-                print("Disabling AI summarization")
-                self.ai_provider = "none"
-            else:
-                try:
-                    from .summarizer import OllamaSummarizer
+    @staticmethod
+    def _summarizer_label(ai_provider: str, summarizer: Any) -> str:
+        if ai_provider == "local":
+            return f"Local Ollama: {summarizer.model}"
 
-                    # Defensive fallback: empty model name reaches
-                    # `ollama run "" <prompt>` and errors with "model is required".
-                    self.summarizer = OllamaSummarizer(model=ai_model or "llama3.2:3b")
-                    logger.info(f"AI summarization enabled (Local Ollama: {ai_model})")
-                    print(f"AI summarization enabled (Local Ollama: {ai_model})")
-                except Exception as e:
-                    logger.error(f"Could not initialize Ollama: {e}", exc_info=True)
-                    print(f"Warning: Could not initialize Ollama: {e}")
-                    self.ai_provider = "none"
+        model_name = summarizer.model_config["name"]
+        return f"{PROVIDERS[ai_provider].label}: {model_name}"
 
     def create_note(
         self,

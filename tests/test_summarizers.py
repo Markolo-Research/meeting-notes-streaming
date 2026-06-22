@@ -8,9 +8,11 @@ here and the source.
 
 from meeting_notes.ai_summarizer import (
     AnthropicSummarizer,
+    BaseSummarizer,
     OpenAISummarizer,
     OpenRouterSummarizer,
 )
+from meeting_notes.summarizer import OllamaSummarizer
 
 
 def test_anthropic_haiku_is_current_4_5():
@@ -92,3 +94,33 @@ def test_anthropic_summarizer_rejects_unknown_model():
 
     with pytest.raises((KeyError, ValueError)):
         AnthropicSummarizer(api_key="sk-ant-test", model="not-a-tier")
+
+
+def test_ollama_uses_canonical_summary_parser():
+    summarizer = OllamaSummarizer()
+
+    assert isinstance(summarizer, BaseSummarizer)
+
+    parsed = summarizer._parse_response(
+        """OVERVIEW:
+Planning session.
+
+KEY POINTS:
+- Agree on scope
+
+ACTION ITEMS:
+- Rolf to open a PR
+
+DECISIONS:
+- Use one parser
+
+PARTICIPANTS:
+Rolf, Alice
+"""
+    )
+
+    assert parsed.overview == "Planning session."
+    assert parsed.key_points == ["Agree on scope"]
+    assert parsed.action_items == ["Rolf to open a PR"]
+    assert parsed.decisions == ["Use one parser"]
+    assert parsed.participants == ["Rolf", "Alice"]
