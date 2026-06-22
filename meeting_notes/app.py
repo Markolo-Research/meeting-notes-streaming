@@ -6,6 +6,7 @@ import time
 import subprocess
 import os
 import multiprocessing.resource_tracker
+import shutil
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional
@@ -28,6 +29,22 @@ from meeting_notes.logger import setup_logging, get_logger
 # Initialize logging
 setup_logging(debug=False)
 logger = get_logger(__name__)
+
+
+def copy_text_to_clipboard(text: str) -> bool:
+    """Copy text using the first available Linux clipboard command."""
+    commands = [
+        ["wl-copy"],
+        ["xclip", "-selection", "clipboard"],
+        ["xsel", "--clipboard"],
+    ]
+    for command in commands:
+        if not shutil.which(command[0]):
+            continue
+        process = subprocess.Popen(command, stdin=subprocess.PIPE)
+        process.communicate(text.encode())
+        return True
+    return False
 
 
 class RecordingView(Container):
@@ -1205,23 +1222,7 @@ class MeetingNotesApp(App):
                 with open(viewer.current_note, "r") as f:
                     content = f.read()
 
-                # Try clipboard tools in order: wl-copy (Wayland), xclip, xsel
-                import shutil
-
-                if shutil.which("wl-copy"):
-                    # Wayland (Hyprland, Sway, etc.)
-                    process = subprocess.Popen(["wl-copy"], stdin=subprocess.PIPE)
-                    process.communicate(content.encode())
-                    self.notify("✓ Copied to clipboard", severity="information")
-                elif shutil.which("xclip"):
-                    # X11 with xclip
-                    process = subprocess.Popen(["xclip", "-selection", "clipboard"], stdin=subprocess.PIPE)
-                    process.communicate(content.encode())
-                    self.notify("✓ Copied to clipboard", severity="information")
-                elif shutil.which("xsel"):
-                    # X11 with xsel
-                    process = subprocess.Popen(["xsel", "--clipboard"], stdin=subprocess.PIPE)
-                    process.communicate(content.encode())
+                if copy_text_to_clipboard(content):
                     self.notify("✓ Copied to clipboard", severity="information")
                 else:
                     self.notify("Install wl-clipboard (Wayland) or xclip/xsel (X11)", severity="error")
@@ -1298,25 +1299,9 @@ class MeetingNotesApp(App):
         viewer = self.query_one("#note-viewer", NoteViewer)
         if viewer.current_note:
             try:
-                import shutil
-
                 file_path = str(viewer.current_note.absolute())
 
-                # Try clipboard tools in order: wl-copy (Wayland), xclip, xsel
-                if shutil.which("wl-copy"):
-                    # Wayland (Hyprland, Sway, etc.)
-                    process = subprocess.Popen(["wl-copy"], stdin=subprocess.PIPE)
-                    process.communicate(file_path.encode())
-                    self.notify(f"✓ Copied path to clipboard", severity="information")
-                elif shutil.which("xclip"):
-                    # X11 with xclip
-                    process = subprocess.Popen(["xclip", "-selection", "clipboard"], stdin=subprocess.PIPE)
-                    process.communicate(file_path.encode())
-                    self.notify(f"✓ Copied path to clipboard", severity="information")
-                elif shutil.which("xsel"):
-                    # X11 with xsel
-                    process = subprocess.Popen(["xsel", "--clipboard"], stdin=subprocess.PIPE)
-                    process.communicate(file_path.encode())
+                if copy_text_to_clipboard(file_path):
                     self.notify(f"✓ Copied path to clipboard", severity="information")
                 else:
                     self.notify("Install wl-clipboard (Wayland) or xclip/xsel (X11)", severity="error")
