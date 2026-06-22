@@ -53,10 +53,6 @@ def copy_text_to_clipboard(
     return False
 
 
-def command_exists(command: str, *, which: Which = shutil.which) -> bool:
-    return bool(which(command))
-
-
 def _try_popen(command: list[str], popen: Popen) -> bool:
     try:
         popen(command)
@@ -77,11 +73,9 @@ def open_in_new_terminal(
         return True
 
     terminal = environ.get("TERMINAL")
-    if terminal:
-        terminal_name = Path(terminal).name
-        terminal_command = TERMINAL_COMMANDS.get(terminal_name)
-        if terminal_command is not None and _try_popen([*terminal_command, command, target], popen):
-            return True
+    terminal_command = TERMINAL_COMMANDS.get(Path(terminal).name) if terminal else None
+    if terminal_command is not None and _try_popen([*terminal_command, command, target], popen):
+        return True
 
     for terminal_name, terminal_command in TERMINAL_COMMANDS.items():
         if which(terminal_name) and _try_popen([*terminal_command, command, target], popen):
@@ -101,19 +95,21 @@ def show_path_in_file_manager(
     file_path = str(note_path.absolute())
     folder = str(note_path.parent)
 
-    if terminal_browser and command_exists(terminal_browser, which=which):
-        if open_in_new_terminal(terminal_browser, folder, environ=environ, which=which, popen=popen):
-            return FolderOpenResult(terminal_browser)
+    if (
+        terminal_browser
+        and which(terminal_browser)
+        and open_in_new_terminal(terminal_browser, folder, environ=environ, which=which, popen=popen)
+    ):
+        return FolderOpenResult(terminal_browser)
 
     for command_prefix, label in FILE_MANAGERS:
-        if command_exists(command_prefix[0], which=which):
+        if which(command_prefix[0]):
             popen([*command_prefix, file_path])
             return FolderOpenResult(label)
 
     for browser in TERMINAL_FILE_BROWSERS:
-        if command_exists(browser, which=which):
-            if open_in_new_terminal(browser, folder, environ=environ, which=which, popen=popen):
-                return FolderOpenResult(browser)
+        if which(browser) and open_in_new_terminal(browser, folder, environ=environ, which=which, popen=popen):
+            return FolderOpenResult(browser)
 
     popen(["xdg-open", folder])
     return FolderOpenResult("folder", opened_folder_only=True)

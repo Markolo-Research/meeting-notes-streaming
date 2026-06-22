@@ -6,6 +6,7 @@ import time
 import subprocess
 import os
 import multiprocessing.resource_tracker
+import shutil
 from pathlib import Path
 from typing import Optional
 
@@ -22,7 +23,6 @@ from meeting_notes.transcriber import WhisperTranscriber
 from meeting_notes.note_maker import NoteMaker
 from meeting_notes.config import load_config, save_config, AppConfig, validate_config, configured_api_key
 from meeting_notes.desktop_integration import (
-    command_exists,
     copy_text_to_clipboard,
     open_in_new_terminal,
     show_path_in_file_manager,
@@ -1106,17 +1106,14 @@ class MeetingNotesApp(App):
             editor = self.config.editor
             file_path = str(viewer.current_note)
 
-            # Check if editor exists
-            if not command_exists(editor):
+            if not shutil.which(editor):
                 self.notify(f"✗ Editor '{editor}' not found. Update in settings (,) or install it.", severity="error")
                 return
 
-            # Try to open in new terminal window
             try:
                 if open_in_new_terminal(editor, file_path):
                     self.notify(f"✓ Opened in {editor}", severity="information")
                 else:
-                    # Fallback: open in same terminal (will replace TUI temporarily)
                     subprocess.Popen([editor, file_path])
                     self.notify(
                         f"⚠ Opened in {editor} (same terminal - no terminal emulator detected)", severity="warning"
