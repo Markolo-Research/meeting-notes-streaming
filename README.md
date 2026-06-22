@@ -54,12 +54,8 @@ sudo apt install python3 python3-pip python3-venv ffmpeg portaudio19-dev pulseau
 #### 2. Set Up Python Environment
 
 ```bash
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate
-
 # Install Python dependencies
-pip install -r requirements.txt
+uv sync --extra all
 ```
 
 **Note:** The first time you run transcription, Whisper will download the `base` model (~140MB).
@@ -93,14 +89,11 @@ ollama pull llama3.2:3b
 ### Run the Application
 
 ```bash
-# Activate virtual environment (if not already active)
-source venv/bin/activate
-
 # Run the application
-python run.py
+uv run meeting-notes
 
 # Or with development mode (preserves temp audio files):
-python run.py --dev
+uv run meeting-notes --dev
 ```
 
 ## Usage
@@ -359,14 +352,14 @@ This is a personal project but suggestions and contributions are welcome!
 
 ```bash
 # Lightweight tests (matches CI — no whisper/torch needed)
-pip install pytest pytest-asyncio ruff openai anthropic openrouter pyyaml
-pytest tests/test_config.py tests/test_paths_and_fallbacks.py \
+uv sync --extra all --extra dev
+uv run pytest tests/test_config.py tests/test_paths_and_fallbacks.py \
        tests/test_recording_retention.py tests/test_summarizers.py
-ruff check meeting_notes/ tests/
+uv run ruff check meeting_notes/ tests/
 
 # Full suite (also runs Textual headless smoke tests; needs the full env)
-pip install -e ".[all,dev]"
-pytest
+uv sync --extra all --extra dev
+uv run pytest
 ```
 
 CI (`.github/workflows/ci.yml`) runs the lightweight subset on every PR.

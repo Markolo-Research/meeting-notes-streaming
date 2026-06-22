@@ -168,8 +168,7 @@ echo
 echo "Testing $PROVIDER_NAME API connection..."
 echo
 
-source venv/bin/activate
-python3 - "$PROVIDER" "$API_KEY" "$DEFAULT_MODEL" << 'PYEOF'
+uv run --extra "$PROVIDER" python - "$PROVIDER" "$API_KEY" "$DEFAULT_MODEL" << 'PYEOF'
 import os
 import sys
 
@@ -221,7 +220,7 @@ except Exception as e:
     print("\nMake sure:")
     print("  1. Your API key is correct")
     print("  2. You have internet connection")
-    print(f"  3. Run: pip install {provider}")
+    print(f"  3. Run: uv sync --extra {provider}")
     sys.exit(1)
 PYEOF
 
@@ -231,7 +230,7 @@ echo "  Next Steps"
 echo "=================================="
 echo
 echo "1. Start recording meetings:"
-echo "   python run.py"
+echo "   uv run meeting-notes"
 echo
 echo "2. Keyboard shortcuts:"
 echo "   r - Start recording"
@@ -242,11 +241,5 @@ echo "3. Enjoy fast AI summaries! ⚡"
 echo
 echo "Note: You can change models or providers anytime in settings (press ',')"
 echo
-echo "1. Start recording meetings:"
-echo "   python run.py"
-echo
-echo "2. Press 'r' to start, 's' to stop"
-echo
-echo "3. Enjoy fast AI summaries! ⚡"
 echo
 echo "Tip: Check out OPENROUTER_SETUP.md for more details"

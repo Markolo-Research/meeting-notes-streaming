@@ -30,27 +30,11 @@ if [ -f "$CONFIG_FILE" ]; then
     echo ""
 fi
 
-# Detect python command
-if command -v python &> /dev/null; then
-    PYTHON=python
-else
-    PYTHON=python3
+if ! command -v uv &> /dev/null; then
+    echo "ERROR: uv not found. Install uv first:"
+    echo "   https://docs.astral.sh/uv/getting-started/installation/"
+    exit 1
 fi
-
-# Check if running in virtual environment
-if [ -z "$VIRTUAL_ENV" ]; then
-    echo "Creating virtual environment..."
-    $PYTHON -m venv venv
-    echo "Virtual environment created"
-    echo ""
-    echo "Please activate the virtual environment and run this script again:"
-    echo "   source venv/bin/activate"
-    echo "   ./setup.sh"
-    exit 0
-fi
-
-echo "Virtual environment detected: $VIRTUAL_ENV"
-echo ""
 
 # Check system dependencies
 echo "Checking system dependencies..."
@@ -74,8 +58,7 @@ echo ""
 
 # Install Python dependencies
 echo "Installing Python dependencies..."
-pip install --upgrade pip
-pip install -r requirements.txt
+uv sync --extra all
 
 echo ""
 echo "======================================"
@@ -156,7 +139,7 @@ echo "  Setup Complete!"
 echo "======================================"
 echo ""
 echo "To run the application:"
-echo "   $PYTHON run.py"
+echo "   uv run meeting-notes"
 echo ""
 echo "Keyboard shortcuts:"
 echo "   r - Start recording"

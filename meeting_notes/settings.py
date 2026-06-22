@@ -740,63 +740,20 @@ class SettingsScreen(Screen):
 
     def action_save(self) -> None:
         """Save settings and close."""
-        # Update config from inputs (only if they're currently mounted)
-        try:
-            notes_input = self.query("#notes-dir-input")
-            if notes_input:
-                self.config["notes_dir"] = notes_input[0].value.strip()
-        except Exception:
-            pass
-
-        try:
-            rec_input = self.query("#rec-dir-input")
-            if rec_input:
-                self.config["recordings_dir"] = rec_input[0].value.strip()
-        except Exception:
-            pass
-
-        try:
-            trans_input = self.query("#trans-dir-input")
-            if trans_input:
-                self.config["transcripts_dir"] = trans_input[0].value.strip()
-        except Exception:
-            pass
-
-        try:
-            editor_input = self.query("#editor-input")
-            if editor_input:
-                self.config["editor"] = editor_input[0].value.strip()
-        except Exception:
-            pass
-
-        try:
-            browser_input = self.query("#terminal-file-browser-input")
-            if browser_input:
-                self.config["terminal_file_browser"] = browser_input[0].value.strip()
-        except Exception:
-            pass
-
-        # Update API keys from inputs
-        try:
-            openai_key = self.query("#openai-key-input")
-            if openai_key:
-                self.config["openai_api_key"] = openai_key[0].value.strip()
-        except Exception:
-            pass
-
-        try:
-            anthropic_key = self.query("#anthropic-key-input")
-            if anthropic_key:
-                self.config["anthropic_api_key"] = anthropic_key[0].value.strip()
-        except Exception:
-            pass
-
-        try:
-            openrouter_key = self.query("#openrouter-key-input")
-            if openrouter_key:
-                self.config["openrouter_api_key"] = openrouter_key[0].value.strip()
-        except Exception:
-            pass
+        # Update config from inputs only if the current settings section is mounted.
+        for selector, key in (
+            ("#notes-dir-input", "notes_dir"),
+            ("#rec-dir-input", "recordings_dir"),
+            ("#trans-dir-input", "transcripts_dir"),
+            ("#editor-input", "editor"),
+            ("#terminal-file-browser-input", "terminal_file_browser"),
+            ("#openai-key-input", "openai_api_key"),
+            ("#anthropic-key-input", "anthropic_api_key"),
+            ("#openrouter-key-input", "openrouter_api_key"),
+        ):
+            field = self.query(selector)
+            if field:
+                self.config[key] = field[0].value.strip()
 
         # Create config object and validate
         new_config = AppConfig.from_dict(self.config)
