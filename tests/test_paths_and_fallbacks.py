@@ -108,7 +108,7 @@ def test_note_maker_rejects_unknown_ai_provider(tmp_path):
 def test_note_maker_does_not_silently_disable_configured_cloud_ai(tmp_path, monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
-    with pytest.raises(ValueError, match="OpenAI API key required"):
+    with pytest.raises(ValueError, match="OpenAI .*API key required"):
         NoteMaker(
             output_dir=str(tmp_path / "notes"),
             transcripts_dir=str(tmp_path / "transcripts"),
