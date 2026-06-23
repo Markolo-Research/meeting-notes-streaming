@@ -204,6 +204,11 @@ class CopilotTokenManager:
 
         return self._refresh_token()
 
+    def invalidate(self) -> None:
+        """Force the next get_token() call to fetch a fresh Copilot session token."""
+        self._copilot_token = None
+        self._expires_at = 0
+
     def _refresh_token(self) -> str:
         """Exchange GitHub token for a fresh Copilot session token."""
         logger.info("Refreshing Copilot session token")

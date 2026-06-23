@@ -498,9 +498,9 @@ class CopilotSummarizer(BaseSummarizer):
         self.model = self.model_config["id"]
 
         try:
-            from .copilot_auth import COPILOT_API_BASE
+            from .copilot_auth import COPILOT_API_BASE, CopilotTokenManager
 
-            self._oauth_token = api_key
+            self._token_manager = CopilotTokenManager(api_key)
             self.copilot_api_base = COPILOT_API_BASE
         except Exception as e:
             raise RuntimeError(f"Failed to initialize Copilot auth: {e}")
@@ -512,17 +512,15 @@ class CopilotSummarizer(BaseSummarizer):
         except ImportError:
             raise ImportError("openai package not installed. Run: pip install openai")
 
-        # Create initial client (token used directly as Bearer)
         self._client = None
         self._current_token = None
 
     def _get_client(self):
-        """Get an OpenAI client using the OAuth token directly as Bearer."""
+        """Get an OpenAI client using a short-lived Copilot session token."""
         from meeting_notes import __version__
 
-        token = self._oauth_token
+        token = self._token_manager.get_token()
 
-        # Re-create client if token changed
         if token != self._current_token:
             self._client = self._openai_class(
                 api_key=token,
@@ -586,6 +584,7 @@ class CopilotSummarizer(BaseSummarizer):
                 if attempt < max_retries - 1:
                     # If it's a token error, force a refresh before retrying
                     self._current_token = None
+                    self._token_manager.invalidate()
                     logger.warning(error_msg + f" - Retrying in {retry_delay}s...")
                     print(f"Warning: {error_msg} - Retrying in {retry_delay}s...")
                     time.sleep(retry_delay)

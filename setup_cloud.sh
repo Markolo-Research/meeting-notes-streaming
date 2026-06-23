@@ -84,16 +84,16 @@ else
     echo "(Get one at: $KEY_URL)"
     echo
     read -p "API Key: " API_KEY
-    
+
     if [ -z "$API_KEY" ]; then
         echo "❌ No API key provided"
         exit 1
     fi
-    
+
     # Ask if they want to save to bashrc
     echo
     read -p "Save to ~/.bashrc? (y/n): " SAVE_TO_BASHRC
-    
+
     if [ "$SAVE_TO_BASHRC" = "y" ]; then
         echo "export $ENV_VAR=\"$API_KEY\"" >> ~/.bashrc
         echo "✓ Added to ~/.bashrc (restart terminal or run: source ~/.bashrc)"
@@ -129,7 +129,7 @@ if [ -f "$CONFIG_FILE" ]; then
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo
     read -p "Continue and overwrite config? (y/n): " CONFIRM
-    
+
     if [ "$CONFIRM" != "y" ] && [ "$CONFIRM" != "Y" ]; then
         echo
         echo "❌ Setup cancelled. No changes made."
@@ -137,7 +137,7 @@ if [ -f "$CONFIG_FILE" ]; then
         echo "Tip: You can update your API key in the app by pressing ','"
         exit 0
     fi
-    
+
     # Backup existing config
     cp "$CONFIG_FILE" "$CONFIG_FILE.backup"
     echo
@@ -146,7 +146,7 @@ fi
 
 # Create or update config based on provider
 cat > "$CONFIG_FILE" << EOF
-# AI Summarization Settings  
+# AI Summarization Settings
 ai_provider: $PROVIDER
 ai_model: $DEFAULT_MODEL
 
@@ -194,10 +194,10 @@ model = sys.argv[3]
 
 try:
     from meeting_notes import ai_summarizer
-    
+
     # Test connection based on provider
     print(f"Testing {provider.upper()} connection...")
-    
+
     if provider == "openai":
         from meeting_notes.ai_summarizer import OpenAISummarizer
         summarizer = OpenAISummarizer(api_key=api_key, model=model)
@@ -207,7 +207,7 @@ try:
         print(f"  Short (5 min, ~500 words):  $0.001 - $0.003")
         print(f"  Medium (30 min, ~5k words): $0.010 - $0.030")
         print(f"  Long (1 hour, ~10k words):  $0.020 - $0.060")
-        
+
     elif provider == "anthropic":
         from meeting_notes.ai_summarizer import AnthropicSummarizer
         summarizer = AnthropicSummarizer(api_key=api_key, model=model)
@@ -217,7 +217,7 @@ try:
         print(f"  Short (5 min, ~500 words):  $0.002 - $0.008")
         print(f"  Medium (30 min, ~5k words): $0.015 - $0.050")
         print(f"  Long (1 hour, ~10k words):  $0.030 - $0.100")
-        
+
     elif provider == "openrouter":
         from meeting_notes.ai_summarizer import OpenRouterSummarizer
         summarizer = OpenRouterSummarizer(api_key=api_key, model=model)
@@ -227,18 +227,18 @@ try:
         print(f"  Short (5 min, ~500 words):  $0.001 - $0.005")
         print(f"  Medium (30 min, ~5k words): $0.005 - $0.025")
         print(f"  Long (1 hour, ~10k words):  $0.010 - $0.050")
-    
+
     elif provider == "copilot":
         from meeting_notes.ai_summarizer import CopilotSummarizer
         summarizer = CopilotSummarizer(api_key=api_key, model=model)
         print(f"\n✓ Connected successfully to Copilot!")
         print(f"✓ Using model: {summarizer.model_config['name']}")
         print(f"\nTypical meeting costs:")
-        print(f"  TODO")
-    
+        print(f"  Included with your active GitHub Copilot subscription")
+
     print("\n🎉 Setup complete! Your meetings will now be summarized in seconds!")
     sys.exit(0)
-    
+
 except Exception as e:
     print(f"\n❌ Error: {e}")
     print("\nMake sure:")
