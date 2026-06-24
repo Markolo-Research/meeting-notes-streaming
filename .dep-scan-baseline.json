@@ -1,52 +1,42 @@
 {
-  "repo": "meeting-notes-tui",
-  "scan_date": "2026-06-15",
-  "generated_at": "2026-06-15T09:01:00Z",
-  "source": "precomputed-weekly-audit-json",
-  "dep_count": null,
-  "findings": [],
-  "remediated": [],
-  "deferred": [],
-  "delta": {
-    "new": [],
-    "resolved": [],
-    "unchanged": []
-  },
-  "advisory_verification": {
-    "GHSA-gv7w-rqvm-qjhr": {
-      "url": "https://github.com/advisories/GHSA-gv7w-rqvm-qjhr",
-      "severity": "high",
-      "fixed": "0.28.1"
-    },
-    "GHSA-w7jw-789q-3m8p": {
-      "url": "https://github.com/advisories/GHSA-w7jw-789q-3m8p",
+  "advisory_verification": [],
+  "deferred": [
+    {
+      "direct": true,
+      "id": "CVE-2025-3000/GHSA-rrmf-rvhw-rf47",
+      "package": "torch",
+      "scope": "direct",
       "severity": "critical",
-      "fixed": "1.8.4"
-    },
-    "GHSA-cx3h-4qpv-8hc9": {
-      "url": "https://github.com/advisories/GHSA-cx3h-4qpv-8hc9",
-      "severity": "low",
-      "fixed": "6.5.6"
-    },
-    "GHSA-hg6j-4rv6-33pg": {
-      "url": "https://github.com/advisories/GHSA-hg6j-4rv6-33pg",
-      "severity": "moderate",
-      "fixed": "3.14.0"
-    },
-    "GHSA-qx2v-qp2m-jg93": {
-      "url": "https://github.com/advisories/GHSA-qx2v-qp2m-jg93",
-      "severity": "moderate",
-      "fixed": "8.5.10"
-    },
-    "GHSA-rrmf-rvhw-rf47": {
-      "url": "https://github.com/advisories/GHSA-rrmf-rvhw-rf47",
-      "severity": "low",
-      "fixed": null
+      "status": "unresolved",
+      "version": "2.12.0"
     }
+  ],
+  "delta": {
+    "new": 1,
+    "resolved": 0,
+    "unchanged": 1
   },
-  "thinning_candidates": [],
+  "dep_count": null,
+  "findings": [
+    {
+      "direct": true,
+      "id": "CVE-2025-3000/GHSA-rrmf-rvhw-rf47",
+      "package": "torch",
+      "scope": "direct",
+      "severity": "critical",
+      "status": "unresolved",
+      "version": "2.12.0"
+    }
+  ],
+  "generated_at": "2026-06-22T09:02:00Z",
   "notes": [
     "2026-06-15: Weekly scan from pre-computed audit JSON. Applied safe direct/transitive lock remediations; did not rerun full audit scanners per job input.",
-    "No pre-computed audit JSON was supplied for this repo in the 2026-06-15 job payload; full audit scanners were not rerun."
-  ]
+    "No pre-computed audit JSON was supplied for this repo in the 2026-06-15 job payload; full audit scanners were not rerun.",
+    "2026-06-22: processed precomputed weekly scan; remediated 0 dependency issues; residual findings=1."
+  ],
+  "remediated": [],
+  "repo": "meeting-notes-tui",
+  "scan_date": "2026-06-22",
+  "source": "precomputed weekly audit JSON",
+  "thinning_candidates": []
 }
