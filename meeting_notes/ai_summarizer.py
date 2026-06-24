@@ -6,7 +6,7 @@ import os
 import time
 
 from .logger import get_logger
-from .ai_models import ANTHROPIC_MODELS, OPENAI_MODELS, OPENROUTER_MODELS
+from .ai_models import PROVIDERS
 
 logger = get_logger(__name__)
 
@@ -214,21 +214,35 @@ PARTICIPANTS:
             )
 
 
-class OpenAISummarizer(BaseSummarizer):
+class CloudSummarizer(BaseSummarizer):
+    """Shared cloud-provider model selection and API key validation."""
+
+    provider_id: str
+
+    def __init__(self, api_key: Optional[str] = None, model: str | None = None):
+        provider = PROVIDERS[self.provider_id]
+        env_var = provider.env_var
+        if env_var is None:
+            raise ValueError(f"{provider.label} does not use API keys")
+        self.api_key = api_key or os.getenv(env_var)
+        if not self.api_key:
+            raise ValueError(f"{provider.label} API key required. Set {env_var} environment variable.")
+
+        selected_model = model or provider.default_model
+        if selected_model not in provider.models:
+            raise ValueError(f"Invalid model: {selected_model}. Choose from: {list(provider.models)}")
+
+        self.model_config = provider.models[selected_model]
+        self.model = self.model_config["id"]
+
+
+class OpenAISummarizer(CloudSummarizer):
     """Summarizer using OpenAI API."""
 
-    MODELS = OPENAI_MODELS
+    provider_id = "openai"
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "standard"):
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
-        if not self.api_key:
-            raise ValueError("OpenAI API key required. Set OPENAI_API_KEY environment variable.")
-
-        if model not in self.MODELS:
-            raise ValueError(f"Invalid model: {model}. Choose from: {list(self.MODELS.keys())}")
-
-        self.model_config = self.MODELS[model]
-        self.model = self.model_config["id"]
+    def __init__(self, api_key: Optional[str] = None, model: str | None = None):
+        super().__init__(api_key=api_key, model=model)
 
         try:
             from openai import OpenAI
@@ -280,21 +294,13 @@ class OpenAISummarizer(BaseSummarizer):
                     raise
 
 
-class AnthropicSummarizer(BaseSummarizer):
+class AnthropicSummarizer(CloudSummarizer):
     """Summarizer using Anthropic API."""
 
-    MODELS = ANTHROPIC_MODELS
+    provider_id = "anthropic"
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "sonnet"):
-        self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
-        if not self.api_key:
-            raise ValueError("Anthropic API key required. Set ANTHROPIC_API_KEY environment variable.")
-
-        if model not in self.MODELS:
-            raise ValueError(f"Invalid model: {model}. Choose from: {list(self.MODELS.keys())}")
-
-        self.model_config = self.MODELS[model]
-        self.model = self.model_config["id"]
+    def __init__(self, api_key: Optional[str] = None, model: str | None = None):
+        super().__init__(api_key=api_key, model=model)
 
         try:
             from anthropic import Anthropic
@@ -347,21 +353,13 @@ class AnthropicSummarizer(BaseSummarizer):
                     raise
 
 
-class OpenRouterSummarizer(BaseSummarizer):
+class OpenRouterSummarizer(CloudSummarizer):
     """Summarizer using OpenRouter API (access to 300+ models)."""
 
-    MODELS = OPENROUTER_MODELS
+    provider_id = "openrouter"
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "claude-sonnet"):
-        self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
-        if not self.api_key:
-            raise ValueError("OpenRouter API key required. Set OPENROUTER_API_KEY environment variable.")
-
-        if model not in self.MODELS:
-            raise ValueError(f"Invalid model tier: {model}. Choose from: {list(self.MODELS.keys())}")
-
-        self.model_config = self.MODELS[model]
-        self.model = self.model_config["id"]
+    def __init__(self, api_key: Optional[str] = None, model: str | None = None):
+        super().__init__(api_key=api_key, model=model)
 
         try:
             from openrouter import OpenRouter
