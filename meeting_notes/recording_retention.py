@@ -17,5 +17,5 @@ def cleanup_old_recordings(recordings_dir: Path, retention_days: int) -> None:
             if datetime.fromtimestamp(wav_file.stat().st_mtime) < cutoff:
                 logger.info("Removing old recording: %s (older than %s days)", wav_file.name, retention_days)
                 wav_file.unlink()
-        except OSError as exc:
+        except (OSError, OverflowError, ValueError) as exc:
             logger.warning("Failed to remove %s: %s", wav_file.name, exc)

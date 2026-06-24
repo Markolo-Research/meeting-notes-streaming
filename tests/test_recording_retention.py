@@ -56,6 +56,30 @@ def test_missing_directory_is_noop(tmp_path):
     assert not nonexistent.exists()
 
 
+def test_bad_mtime_is_noop(tmp_path, monkeypatch):
+    """Invalid platform timestamps should not block app startup cleanup."""
+    wav = tmp_path / "bad-time.wav"
+    wav.write_bytes(b"x")
+
+    class BrokenTimestampDatetime(datetime):
+        @classmethod
+        def now(cls):
+            return datetime.now()
+
+        @classmethod
+        def fromtimestamp(cls, timestamp):
+            raise OverflowError("timestamp out of range")
+
+    monkeypatch.setattr(
+        "meeting_notes.recording_retention.datetime",
+        BrokenTimestampDatetime,
+    )
+
+    cleanup_old_recordings(tmp_path, retention_days=30)
+
+    assert wav.exists()
+
+
 def test_only_wav_files_are_considered(tmp_path):
     """Other extensions should not be touched even if very old."""
     old_wav = tmp_path / "old.wav"
