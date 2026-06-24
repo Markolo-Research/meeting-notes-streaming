@@ -1,12 +1,4 @@
-"""Tests for the recording retention cleanup logic.
-
-We test the underlying datetime-comparison logic rather than the
-MeetingNotesApp method directly, because the latter requires a full
-Textual app instance. The logic is small enough that the duplication
-is tolerable, and these tests document the expected behaviour clearly.
-
-If the implementation in app.py changes, this file is the spec.
-"""
+"""Tests for the recording retention cleanup logic."""
 
 import os
 from datetime import datetime, timedelta
@@ -14,20 +6,7 @@ from pathlib import Path
 
 import pytest
 
-
-def _cleanup(recordings_dir: Path, retention_days: int) -> list[str]:
-    """Mirror of MeetingNotesApp._cleanup_old_recordings, returns deleted names."""
-    if retention_days <= 0:
-        return []
-    if not recordings_dir.is_dir():
-        return []
-    cutoff = datetime.now() - timedelta(days=retention_days)
-    removed = []
-    for wav in recordings_dir.glob("*.wav"):
-        if datetime.fromtimestamp(wav.stat().st_mtime) < cutoff:
-            wav.unlink()
-            removed.append(wav.name)
-    return removed
+from meeting_notes.recording_retention import cleanup_old_recordings
 
 
 def _set_age(path: Path, days_ago: int) -> None:
@@ -43,9 +22,8 @@ def test_deletes_old_wav_files(tmp_path):
     _set_age(old, 60)
     _set_age(new, 5)
 
-    removed = _cleanup(tmp_path, retention_days=30)
+    cleanup_old_recordings(tmp_path, retention_days=30)
 
-    assert removed == ["old.wav"]
     assert not old.exists()
     assert new.exists()
 
@@ -55,9 +33,8 @@ def test_retention_zero_disables_cleanup(tmp_path):
     old.write_bytes(b"x")
     _set_age(old, 365)
 
-    removed = _cleanup(tmp_path, retention_days=0)
+    cleanup_old_recordings(tmp_path, retention_days=0)
 
-    assert removed == []
     assert old.exists(), "retention=0 must not delete anything"
 
 
@@ -67,17 +44,40 @@ def test_negative_retention_is_treated_as_disabled(tmp_path):
     old.write_bytes(b"x")
     _set_age(old, 365)
 
-    removed = _cleanup(tmp_path, retention_days=-1)
+    cleanup_old_recordings(tmp_path, retention_days=-1)
 
-    assert removed == []
     assert old.exists()
 
 
 def test_missing_directory_is_noop(tmp_path):
     """If the recordings dir doesn't exist, cleanup must not crash."""
     nonexistent = tmp_path / "does-not-exist"
-    removed = _cleanup(nonexistent, retention_days=30)
-    assert removed == []
+    cleanup_old_recordings(nonexistent, retention_days=30)
+    assert not nonexistent.exists()
+
+
+def test_bad_mtime_is_noop(tmp_path, monkeypatch):
+    """Invalid platform timestamps should not block app startup cleanup."""
+    wav = tmp_path / "bad-time.wav"
+    wav.write_bytes(b"x")
+
+    class BrokenTimestampDatetime(datetime):
+        @classmethod
+        def now(cls):
+            return datetime.now()
+
+        @classmethod
+        def fromtimestamp(cls, timestamp):
+            raise OverflowError("timestamp out of range")
+
+    monkeypatch.setattr(
+        "meeting_notes.recording_retention.datetime",
+        BrokenTimestampDatetime,
+    )
+
+    cleanup_old_recordings(tmp_path, retention_days=30)
+
+    assert wav.exists()
 
 
 def test_only_wav_files_are_considered(tmp_path):
@@ -89,9 +89,8 @@ def test_only_wav_files_are_considered(tmp_path):
         f.write_bytes(b"x")
         _set_age(f, 60)
 
-    removed = _cleanup(tmp_path, retention_days=30)
+    cleanup_old_recordings(tmp_path, retention_days=30)
 
-    assert removed == ["old.wav"]
     assert not old_wav.exists()
     assert old_txt.exists()
     assert old_md.exists()
@@ -102,8 +101,7 @@ def test_files_at_exactly_the_boundary_are_kept(tmp_path):
     edge = tmp_path / "edge.wav"
     edge.write_bytes(b"x")
     _set_age(edge, 5)  # comfortably newer than 30-day cutoff
-    removed = _cleanup(tmp_path, retention_days=30)
-    assert removed == []
+    cleanup_old_recordings(tmp_path, retention_days=30)
     assert edge.exists()
 
 
@@ -125,5 +123,5 @@ def test_retention_boundary_table(tmp_path, days_old, retention, should_delete):
     f = tmp_path / "x.wav"
     f.write_bytes(b"x")
     _set_age(f, days_old)
-    _cleanup(tmp_path, retention_days=retention)
+    cleanup_old_recordings(tmp_path, retention_days=retention)
     assert f.exists() != should_delete

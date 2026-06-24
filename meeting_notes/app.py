@@ -8,7 +8,6 @@ import os
 import multiprocessing.resource_tracker
 import shutil
 from pathlib import Path
-from datetime import datetime, timedelta
 from typing import Optional
 
 from textual.app import App, ComposeResult
@@ -23,28 +22,18 @@ from meeting_notes.recorder import AudioRecorder
 from meeting_notes.transcriber import WhisperTranscriber
 from meeting_notes.note_maker import NoteMaker
 from meeting_notes.config import load_config, save_config, AppConfig, validate_config, configured_api_key
+from meeting_notes.desktop_integration import (
+    copy_text_to_clipboard,
+    open_in_new_terminal,
+    show_path_in_file_manager,
+)
+from meeting_notes.recording_retention import cleanup_old_recordings
 from meeting_notes.settings import SettingsScreen
 from meeting_notes.logger import setup_logging, get_logger
 
 # Initialize logging
 setup_logging(debug=False)
 logger = get_logger(__name__)
-
-
-def copy_text_to_clipboard(text: str) -> bool:
-    """Copy text using the first available Linux clipboard command."""
-    commands = [
-        ["wl-copy"],
-        ["xclip", "-selection", "clipboard"],
-        ["xsel", "--clipboard"],
-    ]
-    for command in commands:
-        if not shutil.which(command[0]):
-            continue
-        process = subprocess.Popen(command, stdin=subprocess.PIPE)
-        process.communicate(text.encode())
-        return True
-    return False
 
 
 class RecordingView(Container):
@@ -727,29 +716,7 @@ class MeetingNotesApp(App):
         self.recording_start_time = None
         self.all_note_paths = []  # Store all note paths for filtering
 
-        # Clean up old recordings on startup
-        self._cleanup_old_recordings()
-
-    def _cleanup_old_recordings(self) -> None:
-        """Delete .wav recordings older than recording_retention_days.
-
-        No-op if retention_days <= 0 or the recordings dir doesn't exist.
-        Errors are logged but not raised — cleanup is best-effort.
-        """
-        retention_days = getattr(self.config, "recording_retention_days", 0)
-        if retention_days <= 0:
-            return
-        recordings_dir = Path(self.config.recordings_dir).expanduser()
-        if not recordings_dir.is_dir():
-            return
-        cutoff = datetime.now() - timedelta(days=retention_days)
-        for wav_file in recordings_dir.glob("*.wav"):
-            try:
-                if datetime.fromtimestamp(wav_file.stat().st_mtime) < cutoff:
-                    logger.info(f"Removing old recording: {wav_file.name} (older than {retention_days} days)")
-                    wav_file.unlink()
-            except Exception as e:
-                logger.warning(f"Failed to remove {wav_file.name}: {e}")
+        cleanup_old_recordings(Path(self.config.recordings_dir).expanduser(), self.config.recording_retention_days)
 
     def compose(self) -> ComposeResult:
         """Build the UI."""
@@ -1132,79 +1099,21 @@ class MeetingNotesApp(App):
             # Clear status back to idle after error
             self._write_status_file("idle")
 
-    def _open_in_new_terminal(self, editor: str, file_path: str) -> bool:
-        """
-        Open editor in a new terminal window.
-
-        Returns:
-            True if successfully opened in new terminal, False otherwise
-        """
-        import shutil
-
-        # If running inside tmux, open editor in a new tmux window
-        if os.getenv("TMUX"):
-            try:
-                subprocess.Popen(["tmux", "new-window", "--", editor, file_path])
-                return True
-            except Exception:
-                pass  # Fall through to terminal detection
-        # Try to detect terminal emulator (check $TERMINAL first, then common terminals)
-        terminal = os.getenv("TERMINAL")
-
-        terminal_commands = {
-            "alacritty": ["alacritty", "-e", editor, file_path],
-            "kitty": ["kitty", editor, file_path],
-            "ghostty": ["ghostty", "-e", editor, file_path],
-            "wezterm": ["wezterm", "start", "--", editor, file_path],
-            "foot": ["foot", editor, file_path],
-            "gnome-terminal": ["gnome-terminal", "--", editor, file_path],
-            "konsole": ["konsole", "-e", editor, file_path],
-            "xterm": ["xterm", "-e", editor, file_path],
-            "urxvt": ["urxvt", "-e", editor, file_path],
-            "st": ["st", "-e", editor, file_path],
-        }
-
-        # If $TERMINAL is set and exists, try it first
-        if terminal:
-            terminal_name = Path(terminal).name
-            if terminal_name in terminal_commands:
-                try:
-                    subprocess.Popen(terminal_commands[terminal_name])
-                    return True
-                except Exception:
-                    pass  # Fall through to auto-detection
-
-        # Auto-detect by checking which terminals are available
-        for term_name, cmd in terminal_commands.items():
-            if shutil.which(term_name):
-                try:
-                    subprocess.Popen(cmd)
-                    return True
-                except Exception:
-                    continue
-
-        return False
-
     def action_open_in_editor(self) -> None:
         """Open selected note in editor in a new terminal window."""
         viewer = self.query_one("#note-viewer", NoteViewer)
         if viewer.current_note:
-            import shutil
-
             editor = self.config.editor
             file_path = str(viewer.current_note)
 
-            # Check if editor exists
             if not shutil.which(editor):
                 self.notify(f"✗ Editor '{editor}' not found. Update in settings (,) or install it.", severity="error")
                 return
 
-            # Try to open in new terminal window
             try:
-                if self._open_in_new_terminal(editor, file_path):
+                if open_in_new_terminal(editor, file_path):
                     self.notify(f"✓ Opened in {editor}", severity="information")
                 else:
-                    # Fallback: open in same terminal (will replace TUI temporarily)
                     subprocess.Popen([editor, file_path])
                     self.notify(
                         f"⚠ Opened in {editor} (same terminal - no terminal emulator detected)", severity="warning"
@@ -1237,57 +1146,11 @@ class MeetingNotesApp(App):
         viewer = self.query_one("#note-viewer", NoteViewer)
         if viewer.current_note:
             try:
-                import shutil
-
-                file_path = str(viewer.current_note.absolute())
-                folder = str(viewer.current_note.parent)
-
-                # If a terminal file browser is configured, use it
-                terminal_browser = self.config.terminal_file_browser
-                if terminal_browser and shutil.which(terminal_browser):
-                    if self._open_in_new_terminal(terminal_browser, folder):
-                        self.notify(f"Opened in {terminal_browser}", severity="information")
-                        return
-
-                # Try to detect file manager and use --select flag
-                # This focuses on the specific file instead of just opening the folder
-                file_managers = [
-                    (["dolphin", "--select", file_path], "dolphin"),  # KDE
-                    (["nautilus", "--select", file_path], "nautilus"),  # GNOME
-                    (["nemo", file_path], "nemo"),  # Cinnamon
-                    (["thunar", file_path], "thunar"),  # XFCE
-                    (["pcmanfm", "--select", file_path], "pcmanfm"),  # LXDE
-                ]
-
-                # Try each file manager
-                opened = False
-                for cmd, fm_name in file_managers:
-                    if shutil.which(cmd[0]):
-                        subprocess.Popen(cmd)
-                        self.notify(f"Opened in {fm_name}", severity="information")
-                        return
-
-                # Fallback: try to auto-detect a terminal file browser
-                terminal_browsers = [
-                    "ranger",
-                    "yazi",
-                    "lf",
-                    "nnn",
-                    "vifm",
-                    "mc",
-                    "vidir",
-                    "joshuto",
-                    "broot",
-                ]
-                for browser in terminal_browsers:
-                    if shutil.which(browser):
-                        if self._open_in_new_terminal(browser, folder):
-                            self.notify(f"Opened in {browser}", severity="information")
-                            return
-
-                # Fallback: just open the folder
-                subprocess.Popen(["xdg-open", folder])
-                self.notify(f"Opened folder (file manager doesn't support --select)", severity="information")
+                result = show_path_in_file_manager(viewer.current_note, self.config.terminal_file_browser)
+                if result.opened_folder_only:
+                    self.notify("Opened folder (file manager doesn't support --select)", severity="information")
+                else:
+                    self.notify(f"Opened in {result.label}", severity="information")
 
             except Exception as e:
                 self.notify(f"Failed to open: {e}", severity="error")
