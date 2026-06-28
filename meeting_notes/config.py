@@ -53,6 +53,13 @@ class AppConfig:
         """Return the expanded absolute path for a configured directory field."""
         return Path(getattr(self, field_name)).expanduser().absolute()
 
+    def resolved_paths(self) -> tuple[Path, Path, Path]:
+        return (
+            self.resolved_path("notes_dir"),
+            self.resolved_path("recordings_dir"),
+            self.resolved_path("transcripts_dir"),
+        )
+
     def _redact_key(self, key: str) -> str:
         """Redact API key for logging."""
         if not key or len(key) < 8:

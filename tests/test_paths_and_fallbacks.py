@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from meeting_notes.config import AppConfig
 from meeting_notes.note_maker import NoteMaker
 from meeting_notes.recorder import AudioRecorder
 
@@ -77,6 +78,20 @@ def test_recorder_expands_user(tmp_path, monkeypatch):
     r = AudioRecorder(output_dir="~/recordings")
     assert r.output_dir == tmp_path / "recordings"
     assert r.output_dir.is_dir()
+
+
+def test_config_resolves_runtime_paths_once(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    notes_dir, recordings_dir, transcripts_dir = AppConfig(
+        notes_dir="~/notes",
+        recordings_dir=str(tmp_path / "nested" / "recordings"),
+        transcripts_dir="transcripts",
+    ).resolved_paths()
+
+    assert notes_dir == tmp_path / "notes"
+    assert recordings_dir == tmp_path / "nested" / "recordings"
+    assert transcripts_dir == Path("transcripts").absolute()
 
 
 def test_empty_ollama_model_falls_back():
