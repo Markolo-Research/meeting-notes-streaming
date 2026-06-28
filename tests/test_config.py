@@ -105,11 +105,30 @@ def test_config_validation_uses_canonical_provider_catalog():
     assert ok, err
 
 
-def test_configured_api_key_prefers_config_over_env(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "env-key")
-    cfg = AppConfig(ai_provider="openai", openai_api_key="config-key")
+@pytest.mark.parametrize("provider_id", ["openai", "anthropic", "openrouter"])
+def test_configured_api_key_prefers_config_over_env(provider_id, monkeypatch):
+    provider = PROVIDERS[provider_id]
+    monkeypatch.setenv(provider.env_var, f"{provider_id}-env-key")
+    cfg = AppConfig.from_dict({"ai_provider": provider_id, provider.api_key_field: f"{provider_id}-config-key"})
 
-    assert configured_api_key(cfg, "openai") == "config-key"
+    assert configured_api_key(cfg, provider_id) == f"{provider_id}-config-key"
+
+
+@pytest.mark.parametrize("provider_id", ["openai", "anthropic", "openrouter"])
+def test_configured_api_key_uses_provider_registry(provider_id, monkeypatch):
+    provider = PROVIDERS[provider_id]
+    monkeypatch.setenv(provider.env_var, f"{provider_id}-env-key")
+    cfg = AppConfig.from_dict({"ai_provider": provider_id, provider.api_key_field: ""})
+
+    assert configured_api_key(cfg, provider_id) == f"{provider_id}-env-key"
+
+
+@pytest.mark.parametrize("provider_id", ["local", "none", "unknown"])
+def test_configured_api_key_ignores_providers_without_keys(provider_id, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "env-key")
+    cfg = AppConfig(ai_provider="none")
+
+    assert configured_api_key(cfg, provider_id) is None
 
 
 def test_validate_none_provider_is_always_valid():

@@ -61,6 +61,14 @@ class AppConfig:
             data["openrouter_api_key"] = self._redact_key(data["openrouter_api_key"])
         return data
 
+    def api_key_values(self) -> dict[str, str]:
+        """Return configured API keys by AppConfig field name."""
+        return {
+            "openai_api_key": self.openai_api_key,
+            "anthropic_api_key": self.anthropic_api_key,
+            "openrouter_api_key": self.openrouter_api_key,
+        }
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "AppConfig":
         """Create config from dictionary."""
@@ -137,13 +145,10 @@ def save_config(config: AppConfig) -> None:
 
 
 def configured_api_key(config: AppConfig, provider: str) -> str | None:
-    if provider == "openai":
-        return config.openai_api_key or os.getenv("OPENAI_API_KEY")
-    if provider == "anthropic":
-        return config.anthropic_api_key or os.getenv("ANTHROPIC_API_KEY")
-    if provider == "openrouter":
-        return config.openrouter_api_key or os.getenv("OPENROUTER_API_KEY")
-    return None
+    provider_spec = PROVIDERS.get(provider)
+    if provider_spec is None or provider_spec.api_key_field is None or provider_spec.env_var is None:
+        return None
+    return config.api_key_values()[provider_spec.api_key_field] or os.getenv(provider_spec.env_var)
 
 
 def validate_config(config: AppConfig) -> tuple[bool, Optional[str]]:

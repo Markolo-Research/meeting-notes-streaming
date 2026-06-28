@@ -379,12 +379,9 @@ class SettingsScreen(Screen):
         widgets.append(Static(""))  # Spacer
 
         # Show provider-specific settings
-        if current_provider == "openai":
-            widgets.extend(self.render_openai_settings())
-        elif current_provider == "anthropic":
-            widgets.extend(self.render_anthropic_settings())
-        elif current_provider == "openrouter":
-            widgets.extend(self.render_openrouter_settings())
+        provider_spec = PROVIDERS.get(current_provider)
+        if provider_spec and provider_spec.models:
+            widgets.extend(self.render_cloud_provider_settings(current_provider))
         elif current_provider == "local":
             widgets.extend(self.render_local_ollama_settings())
         elif current_provider == "none":
@@ -398,17 +395,18 @@ class SettingsScreen(Screen):
 
         return widgets
 
-    def render_openai_settings(self) -> list:
-        """Render OpenAI-specific settings."""
+    def render_cloud_provider_settings(self, provider_id: str) -> list:
+        """Render settings for a cloud AI provider from the provider registry."""
         widgets = []
+        provider = PROVIDERS[provider_id]
 
-        widgets.append(Static("OpenAI Settings", classes="settings-section-title"))
+        widgets.append(Static(f"{provider.label} Settings", classes="settings-section-title"))
 
         # Model selection
         widgets.append(Static("Model", classes="settings-label"))
-        current_model = self.config.get("ai_model", PROVIDERS["openai"].default_model)
+        current_model = self.config.get("ai_model", provider.default_model)
 
-        for model_id, model in PROVIDERS["openai"].models.items():
+        for model_id, model in provider.models.items():
             is_current = model_id == current_model
             marker = "●" if is_current else "○"
             btn = Button(
@@ -421,88 +419,16 @@ class SettingsScreen(Screen):
 
         # API Key
         widgets.append(Static("API Key", classes="settings-label"))
-        api_key = self.config.get("openai_api_key", "")
+        api_key = self.config.get(provider.api_key_field, "") if provider.api_key_field else ""
         key_input = Input(
             value=api_key,
             password=True,
-            id="openai-key-input",
+            id=f"{provider_id}-key-input",
             classes="settings-input",
-            placeholder="sk-... (or set OPENAI_API_KEY env var)",
+            placeholder=f"or set {provider.env_var} env var",
         )
         widgets.append(key_input)
         widgets.append(Static("💡 Tip: Use environment variable for security", classes="settings-hint"))
-
-        return widgets
-
-    def render_anthropic_settings(self) -> list:
-        """Render Anthropic-specific settings."""
-        widgets = []
-
-        widgets.append(Static("Anthropic Claude Settings", classes="settings-section-title"))
-
-        # Model selection
-        widgets.append(Static("Model", classes="settings-label"))
-        current_model = self.config.get("ai_model", PROVIDERS["anthropic"].default_model)
-
-        for model_id, model in PROVIDERS["anthropic"].models.items():
-            is_current = model_id == current_model
-            marker = "●" if is_current else "○"
-            btn = Button(
-                f"{marker} {model['name']}", id=f"aimodel-{model_id}", variant="primary" if is_current else "default"
-            )
-            btn.model_id = model_id
-            widgets.append(btn)
-            if is_current:
-                widgets.append(Static(f"  → {model['description']}", classes="settings-hint"))
-
-        # API Key
-        widgets.append(Static("API Key", classes="settings-label"))
-        api_key = self.config.get("anthropic_api_key", "")
-        key_input = Input(
-            value=api_key,
-            password=True,
-            id="anthropic-key-input",
-            classes="settings-input",
-            placeholder="sk-ant-... (or set ANTHROPIC_API_KEY env var)",
-        )
-        widgets.append(key_input)
-        widgets.append(Static("💡 Tip: Use environment variable for security", classes="settings-hint"))
-
-        return widgets
-
-    def render_openrouter_settings(self) -> list:
-        """Render OpenRouter-specific settings."""
-        widgets = []
-
-        widgets.append(Static("OpenRouter Settings", classes="settings-section-title"))
-
-        # Model selection
-        widgets.append(Static("Model Tier", classes="settings-label"))
-        current_model = self.config.get("ai_model", PROVIDERS["openrouter"].default_model)
-
-        for model_id, model in PROVIDERS["openrouter"].models.items():
-            is_current = model_id == current_model
-            marker = "●" if is_current else "○"
-            btn = Button(
-                f"{marker} {model['name']}", id=f"aimodel-{model_id}", variant="primary" if is_current else "default"
-            )
-            btn.model_id = model_id
-            widgets.append(btn)
-            if is_current:
-                widgets.append(Static(f"  → {model['description']}", classes="settings-hint"))
-
-        # API Key
-        widgets.append(Static("API Key", classes="settings-label"))
-        api_key = self.config.get("openrouter_api_key", "")
-        key_input = Input(
-            value=api_key,
-            password=True,
-            id="openrouter-key-input",
-            classes="settings-input",
-            placeholder="sk-or-... (or set OPENROUTER_API_KEY env var)",
-        )
-        widgets.append(key_input)
-        widgets.append(Static("Get your key at: https://openrouter.ai/keys", classes="settings-hint"))
 
         return widgets
 
@@ -525,7 +451,7 @@ class SettingsScreen(Screen):
                 # Show installed models with current selection
                 # `or` fallback handles empty-string config values, which
                 # dict.get's default does not.
-                current = self.config.get("ollama_model") or "llama3.2:3b"
+                current = self.config.get("ollama_model") or PROVIDERS["local"].default_model
 
                 for model in installed:
                     is_current = model.name == current
@@ -655,7 +581,7 @@ class SettingsScreen(Screen):
                     # `or` fallback so an empty-string ollama_model still
                     # produces a runnable default (dict.get only fills in the
                     # default when the key is missing entirely).
-                    self.config["ai_model"] = self.config.get("ollama_model") or "llama3.2:3b"
+                    self.config["ai_model"] = self.config.get("ollama_model") or PROVIDERS["local"].default_model
                 await self.refresh_content()
 
         # AI model selection (for cloud providers)
