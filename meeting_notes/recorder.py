@@ -4,6 +4,7 @@ import subprocess
 import signal
 import time
 from datetime import datetime
+from os import PathLike
 from pathlib import Path
 from typing import Optional, List
 
@@ -16,7 +17,7 @@ logger = get_logger(__name__)
 class AudioRecorder:
     """Simple audio recorder using pactl for PipeWire/PulseAudio compatibility."""
 
-    def __init__(self, output_dir: str = "recordings", mode: str = "combined", dev_mode: bool = False):
+    def __init__(self, output_dir: str | PathLike[str] = "recordings", mode: str = "combined", dev_mode: bool = False):
         """
         Initialize audio recorder.
 

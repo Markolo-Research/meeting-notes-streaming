@@ -1,6 +1,7 @@
 """Note generation module for creating markdown notes."""
 
 from datetime import datetime
+from os import PathLike
 from pathlib import Path
 from typing import Any, Optional
 from collections import Counter
@@ -25,8 +26,8 @@ class NoteMaker:
 
     def __init__(
         self,
-        output_dir: str = "notes",
-        transcripts_dir: str = "transcripts",
+        output_dir: str | PathLike[str] = "notes",
+        transcripts_dir: str | PathLike[str] = "transcripts",
         ai_provider: str = "none",  # "cloud", "local", or "none"
         ai_model: str = "balanced",  # For cloud: tier, for local: ollama model
         api_key: Optional[str] = None,

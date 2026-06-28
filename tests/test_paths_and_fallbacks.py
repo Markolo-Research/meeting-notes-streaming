@@ -40,11 +40,36 @@ def test_note_maker_creates_nested_dirs(tmp_path):
     assert nm.transcripts_dir.is_dir()
 
 
+def test_note_maker_accepts_resolved_path_objects(tmp_path):
+    notes_dir = tmp_path / "notes"
+    transcripts_dir = tmp_path / "transcripts"
+
+    nm = NoteMaker(
+        output_dir=notes_dir,
+        transcripts_dir=transcripts_dir,
+        ai_provider="none",
+    )
+
+    assert nm.output_dir == notes_dir
+    assert nm.transcripts_dir == transcripts_dir
+    assert nm.output_dir.is_dir()
+    assert nm.transcripts_dir.is_dir()
+
+
 def test_recorder_creates_nested_dirs(tmp_path):
     """AudioRecorder should also handle nested output dirs."""
     deep = tmp_path / "x" / "y" / "z" / "recordings"
     AudioRecorder(output_dir=str(deep))
     assert deep.is_dir()
+
+
+def test_recorder_accepts_resolved_path_objects(tmp_path):
+    recordings_dir = tmp_path / "recordings"
+
+    r = AudioRecorder(output_dir=recordings_dir)
+
+    assert r.output_dir == recordings_dir
+    assert r.output_dir.is_dir()
 
 
 def test_recorder_expands_user(tmp_path, monkeypatch):

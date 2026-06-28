@@ -703,8 +703,8 @@ class MeetingNotesApp(App):
         self.transcriber = WhisperTranscriber(self.config.whisper_model)
 
         self.note_maker = NoteMaker(
-            output_dir=self.config.notes_dir,
-            transcripts_dir=self.config.transcripts_dir,
+            output_dir=self.config.resolved_path("notes_dir"),
+            transcripts_dir=self.config.resolved_path("transcripts_dir"),
             ai_provider=self.config.ai_provider,
             ai_model=self.config.ai_model,
             api_key=configured_api_key(self.config, self.config.ai_provider),
@@ -749,7 +749,9 @@ class MeetingNotesApp(App):
         # Initialize recorder with config
         logger.info(f"Initializing audio recorder (mode: {self.config.recording_mode})")
         self.recorder = AudioRecorder(
-            output_dir=self.config.recordings_dir, mode=self.config.recording_mode, dev_mode=self.dev_mode
+            output_dir=self.config.resolved_path("recordings_dir"),
+            mode=self.config.recording_mode,
+            dev_mode=self.dev_mode,
         )
 
         # Clear status file on startup
@@ -1421,8 +1423,8 @@ class MeetingNotesApp(App):
             self.transcriber = WhisperTranscriber(self.config.whisper_model)
 
             self.note_maker = NoteMaker(
-                output_dir=self.config.notes_dir,
-                transcripts_dir=self.config.transcripts_dir,
+                output_dir=self.config.resolved_path("notes_dir"),
+                transcripts_dir=self.config.resolved_path("transcripts_dir"),
                 ai_provider=self.config.ai_provider,
                 ai_model=self.config.ai_model,
                 api_key=configured_api_key(self.config, self.config.ai_provider),
@@ -1433,7 +1435,9 @@ class MeetingNotesApp(App):
             # Reinitialize recorder if not currently recording
             if not self.is_recording:
                 self.recorder = AudioRecorder(
-                    output_dir=self.config.recordings_dir, mode=self.config.recording_mode, dev_mode=self.dev_mode
+                    output_dir=self.config.resolved_path("recordings_dir"),
+                    mode=self.config.recording_mode,
+                    dev_mode=self.dev_mode,
                 )
 
             # Reload meetings from potentially new directory
