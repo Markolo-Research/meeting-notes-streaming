@@ -709,14 +709,14 @@ class MeetingNotesApp(App):
             ai_model=self.config.ai_model,
             api_key=configured_api_key(self.config, self.config.ai_provider),
         )
-        self.notes_dir = Path(self.config.notes_dir).expanduser()
+        self.notes_dir = self.config.resolved_path("notes_dir")
         self.notes_dir.mkdir(parents=True, exist_ok=True)
         self.is_recording = False
         self.timer_interval = None
         self.recording_start_time = None
         self.all_note_paths = []  # Store all note paths for filtering
 
-        cleanup_old_recordings(Path(self.config.recordings_dir).expanduser(), self.config.recording_retention_days)
+        cleanup_old_recordings(self.config.resolved_path("recordings_dir"), self.config.recording_retention_days)
 
     def compose(self) -> ComposeResult:
         """Build the UI."""
@@ -1378,7 +1378,7 @@ class MeetingNotesApp(App):
                                 break
 
                 if transcript_filename:
-                    transcript_path = Path(self.config.transcripts_dir).expanduser() / transcript_filename
+                    transcript_path = self.config.resolved_path("transcripts_dir") / transcript_filename
 
                     if transcript_path.exists():
                         self.push_screen(TranscriptViewer(transcript_path))
@@ -1427,7 +1427,7 @@ class MeetingNotesApp(App):
                 ai_model=self.config.ai_model,
                 api_key=configured_api_key(self.config, self.config.ai_provider),
             )
-            self.notes_dir = Path(self.config.notes_dir).expanduser()
+            self.notes_dir = self.config.resolved_path("notes_dir")
             self.notes_dir.mkdir(parents=True, exist_ok=True)
 
             # Reinitialize recorder if not currently recording

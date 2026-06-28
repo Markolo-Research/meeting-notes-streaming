@@ -1,6 +1,5 @@
 """Settings UI screens for Meeting Notes."""
 
-from pathlib import Path
 from typing import Optional
 import subprocess
 from textual.app import ComposeResult
@@ -476,6 +475,7 @@ class SettingsScreen(Screen):
     def render_directories_section(self) -> list:
         """Render Directories section."""
         widgets = []
+        config = AppConfig.from_dict(self.config)
 
         widgets.append(Static("📁 Directories", classes="settings-section-title"))
 
@@ -490,7 +490,7 @@ class SettingsScreen(Screen):
         widgets.append(Static("• Directory must already exist", classes="settings-hint"))
         widgets.append(
             Static(
-                f"• Current resolves to: {Path(self.config['notes_dir']).expanduser().absolute()}",
+                f"• Current resolves to: {config.resolved_path('notes_dir')}",
                 classes="settings-hint",
             )
         )
@@ -502,7 +502,7 @@ class SettingsScreen(Screen):
         widgets.append(Static("• Directory must already exist", classes="settings-hint"))
         widgets.append(
             Static(
-                f"• Current resolves to: {Path(self.config['recordings_dir']).expanduser().absolute()}",
+                f"• Current resolves to: {config.resolved_path('recordings_dir')}",
                 classes="settings-hint",
             )
         )
@@ -514,7 +514,7 @@ class SettingsScreen(Screen):
         widgets.append(Static("• Directory must already exist", classes="settings-hint"))
         widgets.append(
             Static(
-                f"• Current resolves to: {Path(self.config['transcripts_dir']).expanduser().absolute()}",
+                f"• Current resolves to: {config.resolved_path('transcripts_dir')}",
                 classes="settings-hint",
             )
         )
