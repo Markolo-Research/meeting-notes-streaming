@@ -1417,11 +1417,9 @@ class MeetingNotesApp(App):
     def handle_settings_closed(self, new_config: Optional[AppConfig]) -> None:
         """Handle settings screen closing."""
         if new_config:
-            # Settings were saved, reload config and components
             self.config = new_config
             notes_dir, recordings_dir, transcripts_dir = self.config.resolved_paths()
 
-            # Reinitialize components with new config
             self.transcriber = WhisperTranscriber(self.config.whisper_model)
             self.note_maker = self._create_note_maker(notes_dir, transcripts_dir)
             self.notes_dir = notes_dir
