@@ -12,6 +12,12 @@ from .ai_models import PROVIDERS
 
 logger = get_logger(__name__)
 
+DIRECTORY_FIELDS = (
+    ("notes_dir", "Notes", "notes"),
+    ("recordings_dir", "Recordings", "recordings"),
+    ("transcripts_dir", "Transcripts", "transcripts"),
+)
+
 
 @dataclass
 class AppConfig:
@@ -42,6 +48,10 @@ class AppConfig:
     def to_dict(self) -> Dict[str, Any]:
         """Convert config to dictionary."""
         return asdict(self)
+
+    def resolved_path(self, field_name: str) -> Path:
+        """Return the expanded absolute path for a configured directory field."""
+        return Path(getattr(self, field_name)).expanduser().absolute()
 
     def _redact_key(self, key: str) -> str:
         """Redact API key for logging."""
@@ -190,38 +200,20 @@ def validate_config(config: AppConfig) -> tuple[bool, Optional[str]]:
         return False, f"Invalid recording_mode: {config.recording_mode}. Must be one of {valid_modes}"
 
     # Validate directories exist or can be created (allow defaults to be auto-created)
-    notes_path = Path(config.notes_dir).expanduser().absolute()
-    if config.notes_dir != "notes":
-        # Non-default paths must already exist
-        if not notes_path.exists():
+    for field_name, label, default_value in DIRECTORY_FIELDS:
+        configured_value = getattr(config, field_name)
+        path = config.resolved_path(field_name)
+        if configured_value == default_value:
+            continue
+        # Non-default paths must already exist.
+        if not path.exists():
             return (
                 False,
-                f"Notes directory does not exist: {notes_path}\nPlease create it first or use a relative path like 'notes'",
+                f"{label} directory does not exist: {path}\n"
+                f"Please create it first or use a relative path like '{default_value}'",
             )
-        if not notes_path.is_dir():
-            return False, f"Notes path is not a directory: {notes_path}"
-
-    rec_path = Path(config.recordings_dir).expanduser().absolute()
-    if config.recordings_dir != "recordings":
-        # Non-default paths must already exist
-        if not rec_path.exists():
-            return (
-                False,
-                f"Recordings directory does not exist: {rec_path}\nPlease create it first or use a relative path like 'recordings'",
-            )
-        if not rec_path.is_dir():
-            return False, f"Recordings path is not a directory: {rec_path}"
-
-    transcripts_path = Path(config.transcripts_dir).expanduser().absolute()
-    if config.transcripts_dir != "transcripts":
-        # Non-default paths must already exist
-        if not transcripts_path.exists():
-            return (
-                False,
-                f"Transcripts directory does not exist: {transcripts_path}\nPlease create it first or use a relative path like 'transcripts'",
-            )
-        if not transcripts_path.is_dir():
-            return False, f"Transcripts path is not a directory: {transcripts_path}"
+        if not path.is_dir():
+            return False, f"{label} path is not a directory: {path}"
 
     return True, None
 

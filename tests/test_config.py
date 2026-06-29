@@ -45,6 +45,13 @@ def test_unknown_keys_in_from_dict_are_ignored():
     assert cfg.ai_provider == "anthropic"
 
 
+def test_resolved_path_expands_configured_directory(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    cfg = AppConfig(notes_dir="~/meeting-notes")
+
+    assert cfg.resolved_path("notes_dir") == tmp_path / "meeting-notes"
+
+
 def test_load_config_fails_loudly_on_invalid_yaml(tmp_path, monkeypatch):
     from meeting_notes.config import load_config
 
@@ -94,6 +101,34 @@ def test_validate_accepts_valid_anthropic_config():
     cfg = AppConfig(ai_provider="anthropic", ai_model="sonnet", anthropic_api_key="sk-ant-test")
     ok, err = validate_config(cfg)
     assert ok, f"expected valid, got error: {err}"
+
+
+def test_validate_accepts_existing_non_default_directories(tmp_path):
+    notes_dir = tmp_path / "notes-out"
+    recordings_dir = tmp_path / "recordings-out"
+    transcripts_dir = tmp_path / "transcripts-out"
+    for path in (notes_dir, recordings_dir, transcripts_dir):
+        path.mkdir()
+
+    cfg = AppConfig(
+        ai_provider="none",
+        notes_dir=str(notes_dir),
+        recordings_dir=str(recordings_dir),
+        transcripts_dir=str(transcripts_dir),
+    )
+
+    ok, err = validate_config(cfg)
+
+    assert ok, err
+
+
+def test_validate_rejects_missing_non_default_directory(tmp_path):
+    cfg = AppConfig(ai_provider="none", transcripts_dir=str(tmp_path / "missing-transcripts"))
+
+    ok, err = validate_config(cfg)
+
+    assert not ok
+    assert "Transcripts directory does not exist" in err
 
 
 def test_config_validation_uses_canonical_provider_catalog():
