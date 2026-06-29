@@ -687,10 +687,8 @@ class MeetingNotesApp(App):
         super().__init__()
         self.dev_mode = dev_mode
 
-        # Load configuration
         self.config = load_config()
 
-        # Validate config
         valid, error = validate_config(self.config)
         if not valid:
             print(f"Warning: Config validation failed: {error}")
@@ -700,16 +698,16 @@ class MeetingNotesApp(App):
 
         self.recorder: Optional[AudioRecorder] = None
         self.transcriber = WhisperTranscriber(self.config.whisper_model)
-        notes_dir, recordings_dir, transcripts_dir = self.config.resolved_paths()
-        self.note_maker = self._create_note_maker(notes_dir, transcripts_dir)
-        self.notes_dir = notes_dir
+        paths = self.config.runtime_paths()
+        self.note_maker = self._create_note_maker(paths.notes_dir, paths.transcripts_dir)
+        self.notes_dir = paths.notes_dir
         self.notes_dir.mkdir(parents=True, exist_ok=True)
         self.is_recording = False
         self.timer_interval = None
         self.recording_start_time = None
         self.all_note_paths = []  # Store all note paths for filtering
 
-        cleanup_old_recordings(recordings_dir, self.config.recording_retention_days)
+        cleanup_old_recordings(paths.recordings_dir, self.config.recording_retention_days)
 
     def _create_note_maker(self, notes_dir: Path, transcripts_dir: Path):
         return NoteMaker(
@@ -752,8 +750,7 @@ class MeetingNotesApp(App):
         self.load_meetings()
 
         logger.info(f"Initializing audio recorder (mode: {self.config.recording_mode})")
-        _, recordings_dir, _ = self.config.resolved_paths()
-        self.recorder = self._create_recorder(recordings_dir)
+        self.recorder = self._create_recorder(self.config.runtime_paths().recordings_dir)
 
         # Clear status file on startup
         self._write_status_file("idle")
@@ -1418,16 +1415,16 @@ class MeetingNotesApp(App):
         """Handle settings screen closing."""
         if new_config:
             self.config = new_config
-            notes_dir, recordings_dir, transcripts_dir = self.config.resolved_paths()
+            paths = self.config.runtime_paths()
 
             self.transcriber = WhisperTranscriber(self.config.whisper_model)
-            self.note_maker = self._create_note_maker(notes_dir, transcripts_dir)
-            self.notes_dir = notes_dir
+            self.note_maker = self._create_note_maker(paths.notes_dir, paths.transcripts_dir)
+            self.notes_dir = paths.notes_dir
             self.notes_dir.mkdir(parents=True, exist_ok=True)
 
             # Reinitialize recorder if not currently recording
             if not self.is_recording:
-                self.recorder = self._create_recorder(recordings_dir)
+                self.recorder = self._create_recorder(paths.recordings_dir)
 
             # Reload meetings from potentially new directory
             self.load_meetings()

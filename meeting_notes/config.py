@@ -2,7 +2,7 @@
 
 from pathlib import Path
 from collections.abc import Mapping
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, NamedTuple
 from dataclasses import dataclass, asdict
 import os
 import yaml
@@ -17,6 +17,14 @@ DIRECTORY_FIELDS = (
     ("recordings_dir", "Recordings", "recordings"),
     ("transcripts_dir", "Transcripts", "transcripts"),
 )
+
+
+class RuntimePaths(NamedTuple):
+    """Resolved runtime directories derived from AppConfig."""
+
+    notes_dir: Path
+    recordings_dir: Path
+    transcripts_dir: Path
 
 
 @dataclass
@@ -53,11 +61,12 @@ class AppConfig:
         """Return the expanded absolute path for a configured directory field."""
         return Path(getattr(self, field_name)).expanduser().absolute()
 
-    def resolved_paths(self) -> tuple[Path, Path, Path]:
-        return (
-            self.resolved_path("notes_dir"),
-            self.resolved_path("recordings_dir"),
-            self.resolved_path("transcripts_dir"),
+    def runtime_paths(self) -> RuntimePaths:
+        """Return resolved runtime directories as a named config-owned value."""
+        return RuntimePaths(
+            notes_dir=self.resolved_path("notes_dir"),
+            recordings_dir=self.resolved_path("recordings_dir"),
+            transcripts_dir=self.resolved_path("transcripts_dir"),
         )
 
     def _redact_key(self, key: str) -> str:

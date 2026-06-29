@@ -83,15 +83,15 @@ def test_recorder_expands_user(tmp_path, monkeypatch):
 def test_config_resolves_runtime_paths_once(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
 
-    notes_dir, recordings_dir, transcripts_dir = AppConfig(
+    paths = AppConfig(
         notes_dir="~/notes",
         recordings_dir=str(tmp_path / "nested" / "recordings"),
         transcripts_dir="transcripts",
-    ).resolved_paths()
+    ).runtime_paths()
 
-    assert notes_dir == tmp_path / "notes"
-    assert recordings_dir == tmp_path / "nested" / "recordings"
-    assert transcripts_dir == Path("transcripts").absolute()
+    assert paths.notes_dir == tmp_path / "notes"
+    assert paths.recordings_dir == tmp_path / "nested" / "recordings"
+    assert paths.transcripts_dir == Path("transcripts").absolute()
 
 
 def test_empty_ollama_model_falls_back():
