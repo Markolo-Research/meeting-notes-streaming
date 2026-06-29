@@ -698,7 +698,6 @@ class MeetingNotesApp(App):
             self.config.ai_provider = "none"
             self.config.ai_model = ""
 
-        # Initialize components with config values
         self.recorder: Optional[AudioRecorder] = None
         self.transcriber = WhisperTranscriber(self.config.whisper_model)
 
@@ -746,12 +745,10 @@ class MeetingNotesApp(App):
         self.sub_title = "Keyboard-driven meeting recorder"
         self.load_meetings()
 
-        # Initialize recorder with config
         logger.info(f"Initializing audio recorder (mode: {self.config.recording_mode})")
+        recordings_dir = self.config.resolved_path("recordings_dir")
         self.recorder = AudioRecorder(
-            output_dir=self.config.resolved_path("recordings_dir"),
-            mode=self.config.recording_mode,
-            dev_mode=self.dev_mode,
+            output_dir=recordings_dir, mode=self.config.recording_mode, dev_mode=self.dev_mode
         )
 
         # Clear status file on startup
@@ -1434,10 +1431,9 @@ class MeetingNotesApp(App):
 
             # Reinitialize recorder if not currently recording
             if not self.is_recording:
+                recordings_dir = self.config.resolved_path("recordings_dir")
                 self.recorder = AudioRecorder(
-                    output_dir=self.config.resolved_path("recordings_dir"),
-                    mode=self.config.recording_mode,
-                    dev_mode=self.dev_mode,
+                    output_dir=recordings_dir, mode=self.config.recording_mode, dev_mode=self.dev_mode
                 )
 
             # Reload meetings from potentially new directory
