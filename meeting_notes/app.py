@@ -1426,7 +1426,6 @@ class MeetingNotesApp(App):
             if not self.is_recording:
                 self.recorder = self._create_recorder(paths.recordings_dir)
 
-            # Reload meetings from potentially new directory
             self.load_meetings()
 
             self.notify("✓ Settings saved and applied", severity="information")

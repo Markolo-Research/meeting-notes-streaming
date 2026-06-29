@@ -19,12 +19,7 @@ DIRECTORY_FIELDS = (
 )
 
 
-class RuntimePaths(NamedTuple):
-    """Resolved runtime directories derived from AppConfig."""
-
-    notes_dir: Path
-    recordings_dir: Path
-    transcripts_dir: Path
+RuntimePaths = NamedTuple("RuntimePaths", [("notes_dir", Path), ("recordings_dir", Path), ("transcripts_dir", Path)])
 
 
 @dataclass
