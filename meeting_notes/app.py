@@ -700,22 +700,28 @@ class MeetingNotesApp(App):
 
         self.recorder: Optional[AudioRecorder] = None
         self.transcriber = WhisperTranscriber(self.config.whisper_model)
-
-        self.note_maker = NoteMaker(
-            output_dir=self.config.resolved_path("notes_dir"),
-            transcripts_dir=self.config.resolved_path("transcripts_dir"),
-            ai_provider=self.config.ai_provider,
-            ai_model=self.config.ai_model,
-            api_key=configured_api_key(self.config, self.config.ai_provider),
-        )
-        self.notes_dir = self.config.resolved_path("notes_dir")
+        notes_dir, recordings_dir, transcripts_dir = self.config.resolved_paths()
+        self.note_maker = self._create_note_maker(notes_dir, transcripts_dir)
+        self.notes_dir = notes_dir
         self.notes_dir.mkdir(parents=True, exist_ok=True)
         self.is_recording = False
         self.timer_interval = None
         self.recording_start_time = None
         self.all_note_paths = []  # Store all note paths for filtering
 
-        cleanup_old_recordings(self.config.resolved_path("recordings_dir"), self.config.recording_retention_days)
+        cleanup_old_recordings(recordings_dir, self.config.recording_retention_days)
+
+    def _create_note_maker(self, notes_dir: Path, transcripts_dir: Path):
+        return NoteMaker(
+            output_dir=notes_dir,
+            transcripts_dir=transcripts_dir,
+            ai_provider=self.config.ai_provider,
+            ai_model=self.config.ai_model,
+            api_key=configured_api_key(self.config, self.config.ai_provider),
+        )
+
+    def _create_recorder(self, recordings_dir: Path):
+        return AudioRecorder(output_dir=recordings_dir, mode=self.config.recording_mode, dev_mode=self.dev_mode)
 
     def compose(self) -> ComposeResult:
         """Build the UI."""
@@ -746,10 +752,8 @@ class MeetingNotesApp(App):
         self.load_meetings()
 
         logger.info(f"Initializing audio recorder (mode: {self.config.recording_mode})")
-        recordings_dir = self.config.resolved_path("recordings_dir")
-        self.recorder = AudioRecorder(
-            output_dir=recordings_dir, mode=self.config.recording_mode, dev_mode=self.dev_mode
-        )
+        _, recordings_dir, _ = self.config.resolved_paths()
+        self.recorder = self._create_recorder(recordings_dir)
 
         # Clear status file on startup
         self._write_status_file("idle")
@@ -1413,28 +1417,17 @@ class MeetingNotesApp(App):
     def handle_settings_closed(self, new_config: Optional[AppConfig]) -> None:
         """Handle settings screen closing."""
         if new_config:
-            # Settings were saved, reload config and components
             self.config = new_config
+            notes_dir, recordings_dir, transcripts_dir = self.config.resolved_paths()
 
-            # Reinitialize components with new config
             self.transcriber = WhisperTranscriber(self.config.whisper_model)
-
-            self.note_maker = NoteMaker(
-                output_dir=self.config.resolved_path("notes_dir"),
-                transcripts_dir=self.config.resolved_path("transcripts_dir"),
-                ai_provider=self.config.ai_provider,
-                ai_model=self.config.ai_model,
-                api_key=configured_api_key(self.config, self.config.ai_provider),
-            )
-            self.notes_dir = self.config.resolved_path("notes_dir")
+            self.note_maker = self._create_note_maker(notes_dir, transcripts_dir)
+            self.notes_dir = notes_dir
             self.notes_dir.mkdir(parents=True, exist_ok=True)
 
             # Reinitialize recorder if not currently recording
             if not self.is_recording:
-                recordings_dir = self.config.resolved_path("recordings_dir")
-                self.recorder = AudioRecorder(
-                    output_dir=recordings_dir, mode=self.config.recording_mode, dev_mode=self.dev_mode
-                )
+                self.recorder = self._create_recorder(recordings_dir)
 
             # Reload meetings from potentially new directory
             self.load_meetings()
