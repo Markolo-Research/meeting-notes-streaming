@@ -1,42 +1,60 @@
 {
-  "advisory_verification": [],
+  "advisory_verification": {
+    "GHSA-96hv-2xvq-fx4p": "Verified: ws fixed in 8.21.0.",
+    "GHSA-fx2h-pf6j-xcff": "Verified: Vite fixed in 8.0.16 / 7.3.5 / 6.4.3.",
+    "GHSA-hmw2-7cc7-3qxx": "Verified: form-data fixed in 4.0.6.",
+    "GHSA-vxpw-j846-p89q": "Verified: undici WebSocket DoS fixed in 6.27.0 per GitHub/OSV advisory; NVD also lists patched 6.x line."
+  },
   "deferred": [
     {
       "direct": true,
-      "id": "CVE-2025-3000/GHSA-rrmf-rvhw-rf47",
+      "fix_version": "none published in audit",
+      "id": "CVE-2025-3000",
       "package": "torch",
       "scope": "direct",
       "severity": "critical",
+      "source": "supplied audit",
       "status": "unresolved",
       "version": "2.12.0"
     }
   ],
   "delta": {
-    "new": 1,
-    "resolved": 0,
-    "unchanged": 1
+    "new": [],
+    "resolved": [],
+    "unchanged": [
+      "CVE-2025-3000"
+    ]
   },
   "dep_count": null,
   "findings": [
     {
       "direct": true,
-      "id": "CVE-2025-3000/GHSA-rrmf-rvhw-rf47",
+      "fix_version": "none published in audit",
+      "id": "CVE-2025-3000",
       "package": "torch",
       "scope": "direct",
       "severity": "critical",
+      "source": "supplied audit",
       "status": "unresolved",
       "version": "2.12.0"
     }
   ],
-  "generated_at": "2026-06-22T09:02:00Z",
+  "generated_at": "2026-06-29T09:01:00Z",
   "notes": [
-    "2026-06-15: Weekly scan from pre-computed audit JSON. Applied safe direct/transitive lock remediations; did not rerun full audit scanners per job input.",
-    "No pre-computed audit JSON was supplied for this repo in the 2026-06-15 job payload; full audit scanners were not rerun.",
-    "2026-06-22: processed precomputed weekly scan; remediated 0 dependency issues; residual findings=1."
+    "2026-06-29: Used supplied audit JSON; did not rerun full pip-audit/pnpm audit before remediation.",
+    "2026-06-29: Removed no stale repo-level exclude-newer/exclude-newer-package config; none found by repo TOML search."
   ],
   "remediated": [],
   "repo": "meeting-notes-tui",
-  "scan_date": "2026-06-22",
-  "source": "precomputed weekly audit JSON",
-  "thinning_candidates": []
+  "scan_date": "2026-06-29",
+  "source": "pre-computed audit JSON plus targeted post-remediation pnpm audit for touched Node repos",
+  "thinning_candidates": [
+    {
+      "deps": "very large CUDA/ML tree",
+      "package": "torch",
+      "recommendation": "Keep for local transcription, but isolate behind optional GPU profile or separate worker environment.",
+      "repo": "meeting-notes-tui",
+      "usage": "Whisper transcription stack"
+    }
+  ]
 }
