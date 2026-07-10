@@ -19,10 +19,8 @@ from textual.screen import Screen, ModalScreen
 from textual import work
 
 from meeting_notes.recorder import AudioRecorder
-from meeting_notes.transcriber import WhisperTranscriber
-from meeting_notes.note_maker import NoteMaker
 from meeting_notes.runtime_services import build_runtime_services
-from meeting_notes.config import load_config, save_config, AppConfig, validate_config, configured_api_key
+from meeting_notes.config import load_config, save_config, AppConfig, validate_config
 from meeting_notes.desktop_integration import (
     copy_text_to_clipboard,
     open_in_new_terminal,
@@ -1416,16 +1414,14 @@ class MeetingNotesApp(App):
             self.config = new_config
 
             # Reinitialize components with new config
-            self.transcriber = WhisperTranscriber(self.config.whisper_model)
-
-            self.note_maker = NoteMaker(
-                output_dir=self.config.notes_dir,
-                transcripts_dir=self.config.transcripts_dir,
-                ai_provider=self.config.ai_provider,
-                ai_model=self.config.ai_model,
-                api_key=configured_api_key(self.config, self.config.ai_provider),
-            )
             self.notes_dir = self.config.resolved_path("notes_dir")
+            services = build_runtime_services(
+                self.config,
+                self.notes_dir,
+                self.config.resolved_path("transcripts_dir"),
+            )
+            self.transcriber = services.transcriber
+            self.note_maker = services.note_maker
             self.notes_dir.mkdir(parents=True, exist_ok=True)
 
             # Reinitialize recorder if not currently recording
