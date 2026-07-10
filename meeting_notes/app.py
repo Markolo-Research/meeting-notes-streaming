@@ -21,6 +21,7 @@ from textual import work
 from meeting_notes.recorder import AudioRecorder
 from meeting_notes.transcriber import WhisperTranscriber
 from meeting_notes.note_maker import NoteMaker
+from meeting_notes.runtime_services import build_runtime_services
 from meeting_notes.config import load_config, save_config, AppConfig, validate_config, configured_api_key
 from meeting_notes.desktop_integration import (
     copy_text_to_clipboard,
@@ -28,6 +29,7 @@ from meeting_notes.desktop_integration import (
     show_path_in_file_manager,
 )
 from meeting_notes.recording_retention import cleanup_old_recordings
+from meeting_notes.recording_session import RecordingSession
 from meeting_notes.settings import SettingsScreen
 from meeting_notes.logger import setup_logging, get_logger
 
@@ -700,23 +702,22 @@ class MeetingNotesApp(App):
 
         # Initialize components with config values
         self.recorder: Optional[AudioRecorder] = None
-        self.transcriber = WhisperTranscriber(self.config.whisper_model)
-
-        self.note_maker = NoteMaker(
-            output_dir=self.config.notes_dir,
-            transcripts_dir=self.config.transcripts_dir,
-            ai_provider=self.config.ai_provider,
-            ai_model=self.config.ai_model,
-            api_key=configured_api_key(self.config, self.config.ai_provider),
-        )
-        self.notes_dir = self.config.resolved_path("notes_dir")
+        notes_dir = self.config.resolved_path("notes_dir")
+        recordings_dir = self.config.resolved_path("recordings_dir")
+        transcripts_dir = self.config.resolved_path("transcripts_dir")
+        services = build_runtime_services(self.config, notes_dir, transcripts_dir)
+        self.transcriber = services.transcriber
+        self.note_maker = services.note_maker
+        self.notes_dir = notes_dir
         self.notes_dir.mkdir(parents=True, exist_ok=True)
-        self.is_recording = False
+        self.recording_session = RecordingSession()
         self.timer_interval = None
-        self.recording_start_time = None
         self.all_note_paths = []  # Store all note paths for filtering
 
-        cleanup_old_recordings(self.config.resolved_path("recordings_dir"), self.config.recording_retention_days)
+        cleanup_old_recordings(recordings_dir, self.config.recording_retention_days)
+
+    def _create_recorder(self, recordings_dir: Path):
+        return AudioRecorder(output_dir=recordings_dir, mode=self.config.recording_mode, dev_mode=self.dev_mode)
 
     def compose(self) -> ComposeResult:
         """Build the UI."""
@@ -853,15 +854,15 @@ class MeetingNotesApp(App):
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         """Control which actions are available based on recording state."""
         if action == "start_recording":
-            return not self.is_recording
+            return not self.recording_session.active
         elif action in ["stop_recording", "cancel_recording"]:
-            return self.is_recording
+            return self.recording_session.active
         return True  # All other actions always available
 
     def update_recording_timer(self) -> None:
         """Called every second to update recording timer."""
-        if self.is_recording and self.recording_start_time:
-            elapsed = int(time.time() - self.recording_start_time)
+        if self.recording_session.active:
+            elapsed = self.recording_session.elapsed_seconds(time.time())
             duration_str = f"{elapsed // 60:02d}:{elapsed % 60:02d}"
 
             # Update status file with current duration
@@ -888,8 +889,7 @@ class MeetingNotesApp(App):
 
                 # Start actual recording
                 self.recorder.start_recording()
-                self.is_recording = True
-                self.recording_start_time = time.time()
+                self.recording_session.start(time.time())
                 logger.info("Recording started successfully")
 
                 # Update status file for Waybar
@@ -922,7 +922,7 @@ class MeetingNotesApp(App):
             except Exception as e:
                 logger.error(f"Failed to start recording: {e}", exc_info=True)
                 self.notify(f"Failed to start recording: {e}", severity="error")
-                self.is_recording = False
+                self.recording_session.stop()
                 # Restore main panels if something failed
                 try:
                     main_panels = self.query_one("#main-panels", Container)
@@ -933,7 +933,7 @@ class MeetingNotesApp(App):
     def action_cancel_recording(self) -> None:
         """Cancel recording and discard without processing."""
         logger.info("Cancelling recording")
-        if not self.is_recording or not self.recorder:
+        if not self.recording_session.active or not self.recorder:
             return
 
         try:
@@ -944,8 +944,7 @@ class MeetingNotesApp(App):
 
             # Stop and discard recording
             self.recorder.stop_recording()
-            self.is_recording = False
-            self.recording_start_time = None
+            self.recording_session.stop()
             logger.info("Recording cancelled successfully")
 
             # Update status back to idle
@@ -1002,8 +1001,7 @@ class MeetingNotesApp(App):
 
                 # Stop recording
                 audio_path = self.recorder.stop_recording()
-                self.is_recording = False
-                self.recording_start_time = None
+                self.recording_session.stop()
                 logger.info(f"Recording stopped. Audio saved to: {audio_path}")
 
                 # Update status to processing
@@ -1030,7 +1028,7 @@ class MeetingNotesApp(App):
             except Exception as e:
                 logger.error(f"Failed to stop recording: {e}", exc_info=True)
                 self.notify(f"Failed to stop recording: {e}", severity="error")
-                self.is_recording = False
+                self.recording_session.stop()
 
     @work(exclusive=True, thread=True)
     def process_recording(self, audio_path: str, meeting_title: Optional[str] = None, user_notes: str = "") -> None:
@@ -1431,10 +1429,8 @@ class MeetingNotesApp(App):
             self.notes_dir.mkdir(parents=True, exist_ok=True)
 
             # Reinitialize recorder if not currently recording
-            if not self.is_recording:
-                self.recorder = AudioRecorder(
-                    output_dir=self.config.recordings_dir, mode=self.config.recording_mode, dev_mode=self.dev_mode
-                )
+            if not self.recording_session.active:
+                self.recorder = self._create_recorder(self.config.resolved_path("recordings_dir"))
 
             # Reload meetings from potentially new directory
             self.load_meetings()

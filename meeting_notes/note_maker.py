@@ -6,18 +6,10 @@ from typing import Any, Optional
 from collections import Counter
 import re
 
-from .ai_models import PROVIDERS
-from .ai_summarizer import AnthropicSummarizer, OpenAISummarizer, OpenRouterSummarizer
 from .logger import get_logger
-from .summarizer import OllamaSummarizer
+from .summarizer_port import Summarizer
 
 logger = get_logger(__name__)
-
-CLOUD_SUMMARIZERS = {
-    "openai": OpenAISummarizer,
-    "anthropic": AnthropicSummarizer,
-    "openrouter": OpenRouterSummarizer,
-}
 
 
 class NoteMaker:
@@ -28,8 +20,7 @@ class NoteMaker:
         output_dir: str = "notes",
         transcripts_dir: str = "transcripts",
         ai_provider: str = "none",  # "cloud", "local", or "none"
-        ai_model: str = "balanced",  # For cloud: tier, for local: ollama model
-        api_key: Optional[str] = None,
+        summarizer: Summarizer | None = None,
     ):
         """
         Initialize note maker.
@@ -38,43 +29,28 @@ class NoteMaker:
             output_dir: Directory to save notes
             transcripts_dir: Directory to save transcripts
             ai_provider: AI provider - "cloud" (OpenRouter), "local" (Ollama), or "none"
-            ai_model: Model to use (tier for cloud, model name for local)
-            api_key: API key for cloud provider (or use env var)
+            summarizer: Provider-neutral summarizer created by the composition root
         """
         logger.info(
-            f"Initializing NoteMaker (output_dir: {output_dir}, transcripts_dir: {transcripts_dir}, ai_provider: {ai_provider}, ai_model: {ai_model})"
+            f"Initializing NoteMaker (output_dir: {output_dir}, transcripts_dir: {transcripts_dir}, ai_provider: {ai_provider})"
         )
         self.output_dir = Path(output_dir).expanduser()
         self.transcripts_dir = Path(transcripts_dir).expanduser()
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.transcripts_dir.mkdir(parents=True, exist_ok=True)
         self.ai_provider = ai_provider
-        self.summarizer = self._create_summarizer(ai_provider, ai_model, api_key)
+        self.summarizer = summarizer
+        if ai_provider != "none" and summarizer is None:
+            raise ValueError("A configured AI provider requires an injected summarizer")
+        if ai_provider == "none" and summarizer is not None:
+            raise ValueError("AI-disabled notes cannot receive a summarizer")
+        if summarizer is not None and summarizer.provider_id != ai_provider:
+            raise ValueError("Summarizer provider does not match ai_provider")
 
         if self.summarizer is not None:
-            label = self._summarizer_label(ai_provider, self.summarizer)
+            label = self.summarizer.display_label
             logger.info(f"AI summarization enabled ({label})")
             print(f"AI summarization enabled ({label})")
-
-    @staticmethod
-    def _create_summarizer(ai_provider: str, ai_model: str, api_key: str | None) -> Any | None:
-        if ai_provider == "none":
-            return None
-        if ai_provider == "local":
-            return OllamaSummarizer(model=ai_model or PROVIDERS["local"].default_model)
-
-        summarizer_cls = CLOUD_SUMMARIZERS.get(ai_provider)
-        if summarizer_cls is None:
-            raise ValueError(f"Invalid ai_provider: {ai_provider}. Must be one of {list(PROVIDERS)}")
-        return summarizer_cls(api_key=api_key, model=ai_model)
-
-    @staticmethod
-    def _summarizer_label(ai_provider: str, summarizer: Any) -> str:
-        if ai_provider == "local":
-            return f"Local Ollama: {summarizer.model}"
-
-        model_name = summarizer.model_config["name"]
-        return f"{PROVIDERS[ai_provider].label}: {model_name}"
 
     def create_note(
         self,
