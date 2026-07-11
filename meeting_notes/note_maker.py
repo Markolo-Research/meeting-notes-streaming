@@ -17,8 +17,8 @@ class NoteMaker:
 
     def __init__(
         self,
-        output_dir: str = "notes",
-        transcripts_dir: str = "transcripts",
+        output_dir: str | Path = "notes",
+        transcripts_dir: str | Path = "transcripts",
         ai_provider: str = "none",  # "cloud", "local", or "none"
         summarizer: Summarizer | None = None,
     ):
