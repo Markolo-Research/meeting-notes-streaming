@@ -31,6 +31,7 @@ concurrency:
 
 jobs:
   ruff:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, linux, x64, markolo-hetzner, ci-light]
     steps:
       - name: Checkout
@@ -54,6 +55,7 @@ jobs:
         run: uvx ruff format --check .
 
   ty:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, linux, x64, markolo-hetzner, ci-light]
     steps:
       - name: Checkout
@@ -77,6 +79,7 @@ jobs:
         run: uv run ty check
 
   slop-scan:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, linux, x64, markolo-hetzner, ci-light]
     steps:
       - name: Checkout
