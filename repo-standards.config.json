@@ -6,9 +6,8 @@
   "requiresGeneratedCheck": false,
   "selfHostedRunnerLabels": [
     "self-hosted",
-    "linux",
-    "x64",
-    "markolo-hetzner",
+    "Linux",
+    "X64",
     "ci-light"
   ],
   "requiredFiles": [
