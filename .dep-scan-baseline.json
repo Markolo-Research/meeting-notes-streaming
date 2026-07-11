@@ -5,55 +5,39 @@
     "GHSA-hmw2-7cc7-3qxx": "Verified: form-data fixed in 4.0.6.",
     "GHSA-vxpw-j846-p89q": "Verified: undici WebSocket DoS fixed in 6.27.0 per GitHub/OSV advisory; NVD also lists patched 6.x line."
   },
-  "deferred": [
-    {
-      "direct": true,
-      "fix_version": "none published in audit",
-      "id": "CVE-2025-3000",
-      "package": "torch",
-      "scope": "direct",
-      "severity": "critical",
-      "source": "supplied audit",
-      "status": "unresolved",
-      "version": "2.12.0"
-    }
-  ],
+  "deferred": [],
   "delta": {
     "new": [],
-    "resolved": [],
-    "unchanged": [
-      "CVE-2025-3000"
-    ]
+    "resolved": [
+      [
+        "torch",
+        "CVE-2025-3000",
+        "2.12.0"
+      ]
+    ],
+    "unchanged": []
   },
-  "dep_count": null,
-  "findings": [
-    {
-      "direct": true,
-      "fix_version": "none published in audit",
-      "id": "CVE-2025-3000",
-      "package": "torch",
-      "scope": "direct",
-      "severity": "critical",
-      "source": "supplied audit",
-      "status": "unresolved",
-      "version": "2.12.0"
-    }
-  ],
-  "generated_at": "2026-06-29T09:01:00Z",
+  "dep_count": 55,
+  "findings": [],
+  "generated_at": "2026-07-11T13:58:34.940238+00:00",
   "notes": [
     "2026-06-29: Used supplied audit JSON; did not rerun full pip-audit/pnpm audit before remediation.",
-    "2026-06-29: Removed no stale repo-level exclude-newer/exclude-newer-package config; none found by repo TOML search."
+    "2026-06-29: Removed no stale repo-level exclude-newer/exclude-newer-package config; none found by repo TOML search.",
+    "2026-07-11: Regenerated the deterministic dependency report after upgrading torch and triton; pip-audit checked 55 locked dependencies and found no known vulnerabilities."
   ],
-  "remediated": [],
-  "repo": "meeting-notes-tui",
-  "scan_date": "2026-06-29",
-  "source": "pre-computed audit JSON plus targeted post-remediation pnpm audit for touched Node repos",
+  "remediated": [
+    "torch 2.12.0 -> 2.12.1",
+    "triton 3.7.0 -> 3.7.1"
+  ],
+  "repo": "meeting-notes-streaming",
+  "scan_date": "2026-07-11",
+  "source": "dep-scan-repo deterministic pip-audit report",
   "thinning_candidates": [
     {
       "deps": "very large CUDA/ML tree",
       "package": "torch",
-      "recommendation": "Keep for local transcription, but isolate behind optional GPU profile or separate worker environment.",
-      "repo": "meeting-notes-tui",
+      "recommendation": "Keep for local transcription, but isolate behind an optional GPU profile or separate worker environment.",
+      "repo": "meeting-notes-streaming",
       "usage": "Whisper transcription stack"
     }
   ]
