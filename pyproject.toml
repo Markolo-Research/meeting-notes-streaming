@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "meeting-notes"
-version = "0.2.0"
+version = "0.3.0"
 description = "A local, privacy-focused AI meeting notetaker for Linux with a keyboard-driven TUI"
 readme = "README.md"
 license = "MIT"

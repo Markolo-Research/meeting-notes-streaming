@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.0 - 2026-07-11
+
 - Added Markolo repo standards scaffolding and `uv`-based maintenance commands.
 
 ### Changed
