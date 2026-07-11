@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from meeting_notes.note_maker import NoteMaker
+from meeting_notes.summarizer_factory import create_summarizer
 from meeting_notes.recorder import AudioRecorder
 
 
@@ -86,32 +87,26 @@ def test_set_ollama_model_passes_through():
 
 
 def test_note_maker_empty_local_model_uses_canonical_default(tmp_path):
-    nm = NoteMaker(
-        output_dir=str(tmp_path / "notes"),
-        transcripts_dir=str(tmp_path / "transcripts"),
-        ai_provider="local",
-        ai_model="",
-    )
-
-    assert nm.summarizer.model == "llama3.2:3b"
+    summarizer = create_summarizer("local", "", None)
+    assert summarizer is not None
+    assert summarizer.display_label == "Local Ollama: llama3.2:3b"
 
 
 def test_note_maker_rejects_unknown_ai_provider(tmp_path):
     with pytest.raises(ValueError, match="Invalid ai_provider"):
-        NoteMaker(
-            output_dir=str(tmp_path / "notes"),
-            transcripts_dir=str(tmp_path / "transcripts"),
-            ai_provider="not-real",
-        )
+        create_summarizer("not-real", "", None)
 
 
 def test_note_maker_does_not_silently_disable_configured_cloud_ai(tmp_path, monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     with pytest.raises(ValueError, match="OpenAI .*API key required"):
-        NoteMaker(
-            output_dir=str(tmp_path / "notes"),
-            transcripts_dir=str(tmp_path / "transcripts"),
-            ai_provider="openai",
-            ai_model="standard",
-        )
+        create_summarizer("openai", "standard", None)
+
+
+def test_note_maker_rejects_provider_summarizer_mismatches(tmp_path):
+    local = create_summarizer("local", "", None)
+    with pytest.raises(ValueError, match="AI-disabled"):
+        NoteMaker(tmp_path / "notes", tmp_path / "transcripts", ai_provider="none", summarizer=local)
+    with pytest.raises(ValueError, match="does not match"):
+        NoteMaker(tmp_path / "notes", tmp_path / "transcripts", ai_provider="openai", summarizer=local)

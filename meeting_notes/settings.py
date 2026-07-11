@@ -9,7 +9,8 @@ from textual.screen import Screen, ModalScreen
 from textual.reactive import reactive
 from textual import work
 
-from meeting_notes.config import AppConfig, save_config, validate_config, get_config_path
+from meeting_notes.config import AppConfig, save_config, get_config_path
+from meeting_notes.settings_model import prepare_settings_update
 from meeting_notes.ai_models import PROVIDERS
 from meeting_notes.ollama_utils import (
     get_installed_models,
@@ -667,6 +668,7 @@ class SettingsScreen(Screen):
     def action_save(self) -> None:
         """Save settings and close."""
         # Update config from inputs only if the current settings section is mounted.
+        fields = {}
         for selector, key in (
             ("#notes-dir-input", "notes_dir"),
             ("#rec-dir-input", "recordings_dir"),
@@ -679,15 +681,13 @@ class SettingsScreen(Screen):
         ):
             field = self.query(selector)
             if field:
-                self.config[key] = field[0].value.strip()
+                fields[key] = field[0].value
 
-        # Create config object and validate
-        new_config = AppConfig.from_dict(self.config)
-        valid, error = validate_config(new_config)
-
-        if not valid:
-            self.app.notify(f"✗ {error}", severity="error", timeout=10)
+        update = prepare_settings_update(self.config, fields)
+        if update.config is None:
+            self.app.notify(f"✗ {update.error}", severity="error", timeout=10)
             return
+        new_config = update.config
 
         # Save to file
         try:

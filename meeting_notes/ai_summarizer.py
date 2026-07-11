@@ -1,25 +1,14 @@
 """Unified AI summarizer supporting multiple cloud providers."""
 
-from dataclasses import dataclass
 from typing import List, Optional
 import os
 import time
 
 from .logger import get_logger
 from .ai_models import PROVIDERS
+from .summarizer_port import MeetingSummary
 
 logger = get_logger(__name__)
-
-
-@dataclass
-class MeetingSummary:
-    """Structured meeting summary."""
-
-    overview: str
-    key_points: List[str]
-    action_items: List[str]
-    decisions: List[str]
-    participants: List[str]
 
 
 class BaseSummarizer:
