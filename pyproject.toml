@@ -52,7 +52,7 @@ dev = [
     "pytest-asyncio>=0.21",
     "pytest-xdist>=3.8.0",
     "ruff>=0.4",
-    "ty>=0.0.1a13",
+    "ty>=0.0.58",
 ]
 
 [tool.pytest.ini_options]
